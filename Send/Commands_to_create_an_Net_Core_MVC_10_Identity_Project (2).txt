@@ -1,0 +1,2579 @@
+$ErrorActionPreference = "Stop"
+
+# ============================================================
+# CONFIGURATION
+# ============================================================
+
+$framework = "net10.0"
+
+$adminEmail = "admin@software.local"
+$adminPassword = "AdminPass123!"
+$adminRole = "Admin"
+
+# Custom Identity fields
+$customUserClass = "ApplicationUser"
+
+# ============================================================
+# 1. CREATE MVC PROJECT
+# ============================================================
+
+Write-Host ""
+Write-Host "==================================================" -ForegroundColor Cyan
+Write-Host "Creating .NET 10 MVC project..." -ForegroundColor Cyan
+Write-Host "==================================================" -ForegroundColor Cyan
+Write-Host ""
+
+dotnet new mvc `
+    -au Individual `
+    -f $framework `
+    -o . `
+    --force
+
+if ($LASTEXITCODE -ne 0) {
+    throw "Failed to create MVC project."
+}
+
+$projectName = (Get-Item .).Name
+$projectFile = "$projectName.csproj"
+$rootNamespace = $projectName
+
+Write-Host ""
+Write-Host "Project name: $projectName" -ForegroundColor Green
+
+# ============================================================
+# 2. CREATE SOLUTION
+# ============================================================
+
+Write-Host ""
+Write-Host "Creating solution..." -ForegroundColor Cyan
+
+if (-not (Test-Path "$projectName.sln")) {
+
+    dotnet new sln -n $projectName
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to create solution."
+    }
+}
+
+dotnet sln "$projectName.sln" add "$projectFile"
+
+if ($LASTEXITCODE -ne 0) {
+    throw "Failed to add project to solution."
+}
+
+# ============================================================
+# 3. INSTALL REQUIRED GLOBAL TOOLS
+# ============================================================
+
+Write-Host ""
+Write-Host "Installing/updating EF and scaffolding tools..." -ForegroundColor Cyan
+
+dotnet tool update --global dotnet-ef
+
+if ($LASTEXITCODE -ne 0) {
+
+    Write-Host "dotnet-ef update failed. Attempting installation..." -ForegroundColor Yellow
+
+    dotnet tool install --global dotnet-ef
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to install dotnet-ef."
+    }
+}
+
+dotnet tool update --global dotnet-aspnet-codegenerator
+
+if ($LASTEXITCODE -ne 0) {
+
+    Write-Host "aspnet-codegenerator update failed. Attempting installation..." -ForegroundColor Yellow
+
+    dotnet tool install --global dotnet-aspnet-codegenerator
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to install dotnet-aspnet-codegenerator."
+    }
+}
+
+# ============================================================
+# IMPORTANT
+#
+# We deliberately DO NOT install dotnet-outdated-tool and
+# DO NOT run dotnet-outdated -u.
+# ============================================================
+
+# ============================================================
+# 4. ADD REQUIRED PACKAGES
+# ============================================================
+
+Write-Host ""
+Write-Host "Adding required NuGet packages..." -ForegroundColor Cyan
+
+dotnet add package Microsoft.VisualStudio.Web.CodeGeneration.Design
+
+if ($LASTEXITCODE -ne 0) {
+    throw "Failed to add code generation package."
+}
+
+dotnet add package Microsoft.AspNetCore.Mvc.Razor.RuntimeCompilation
+
+if ($LASTEXITCODE -ne 0) {
+    throw "Failed to add Razor Runtime Compilation package."
+}
+
+dotnet add package Microsoft.AspNetCore.Identity.UI
+
+if ($LASTEXITCODE -ne 0) {
+    throw "Failed to add Identity UI package."
+}
+
+# ============================================================
+# 5. CREATE CUSTOM APPLICATION USER
+# ============================================================
+
+Write-Host ""
+Write-Host "Creating custom ApplicationUser..." -ForegroundColor Cyan
+
+$dataPath = "Data"
+
+if (-not (Test-Path $dataPath)) {
+    New-Item -ItemType Directory -Path $dataPath -Force | Out-Null
+}
+
+$applicationUser = @"
+using Microsoft.AspNetCore.Identity;
+using System.ComponentModel.DataAnnotations;
+
+namespace $rootNamespace.Data;
+
+public class ApplicationUser : IdentityUser
+{
+    [Required]
+    [StringLength(100)]
+    public string FirstName { get; set; } = string.Empty;
+
+    [Required]
+    [StringLength(100)]
+    public string LastName { get; set; } = string.Empty;
+
+    [StringLength(150)]
+    public string? DisplayName { get; set; }
+}
+"@
+
+Set-Content `
+    -Path "$dataPath\ApplicationUser.cs" `
+    -Value $applicationUser `
+    -Encoding UTF8
+
+# ============================================================
+# 6. MODIFY APPLICATION DBCONTEXT
+# ============================================================
+
+Write-Host ""
+Write-Host "Configuring ApplicationDbContext..." -ForegroundColor Cyan
+
+$dbContextPath = "Data\ApplicationDbContext.cs"
+
+if (-not (Test-Path $dbContextPath)) {
+    throw "ApplicationDbContext.cs was not found."
+}
+
+$dbContext = Get-Content $dbContextPath -Raw
+
+# Change IdentityDbContext to IdentityDbContext<ApplicationUser>
+$dbContext = $dbContext -replace `
+    'IdentityDbContext\s*<([^>]*)>',
+    'IdentityDbContext<ApplicationUser>'
+
+# Handle the template's generic/base class when it has no type argument.
+$dbContext = $dbContext -replace `
+    'IdentityDbContext\s*\(\s*options',
+    'IdentityDbContext<ApplicationUser>(options'
+
+# Ensure using for ApplicationUser namespace.
+if ($dbContext -notmatch "using $rootNamespace\.Data;") {
+
+    # Same namespace is already used in most templates,
+    # but this is harmless if needed.
+    if ($dbContext -notmatch "namespace $rootNamespace\.Data;") {
+        $dbContext =
+            "using $rootNamespace.Data;`r`n" +
+            $dbContext
+    }
+}
+
+# More reliable fallback:
+if ($dbContext -notmatch "IdentityDbContext<ApplicationUser>") {
+
+    $dbContext = $dbContext -replace `
+        'IdentityDbContext',
+        'IdentityDbContext<ApplicationUser>'
+}
+
+Set-Content `
+    -Path $dbContextPath `
+    -Value $dbContext `
+    -Encoding UTF8
+
+# ============================================================
+# 7. MODIFY PROGRAM.CS
+# ============================================================
+
+Write-Host ""
+Write-Host "Configuring Identity, Roles and Runtime Compilation..." -ForegroundColor Cyan
+
+$programPath = "Program.cs"
+$program = Get-Content $programPath -Raw
+
+# ------------------------------------------------------------
+# Add Identity namespace
+# ------------------------------------------------------------
+
+if ($program -notmatch 'using Microsoft\.AspNetCore\.Identity;') {
+
+    $program =
+        "using Microsoft.AspNetCore.Identity;`r`n" +
+        $program
+}
+
+# ------------------------------------------------------------
+# Add ApplicationUser namespace
+# ------------------------------------------------------------
+
+if ($program -notmatch "using $rootNamespace\.Data;") {
+
+    $program =
+        "using $rootNamespace.Data;`r`n" +
+        $program
+}
+
+# ------------------------------------------------------------
+# Replace default Identity registration
+# ------------------------------------------------------------
+
+$identityPattern =
+    'builder\.Services\.AddDefaultIdentity<IdentityUser>\(options\s*=>\s*options\.SignIn\.RequireConfirmedAccount\s*=\s*true\)\s*\.AddEntityFrameworkStores<ApplicationDbContext>\(\);'
+
+$identityReplacement = @'
+builder.Services.AddDefaultIdentity<ApplicationUser>(options =>
+{
+    options.SignIn.RequireConfirmedAccount = false;
+})
+.AddRoles<IdentityRole>()
+.AddEntityFrameworkStores<ApplicationDbContext>();
+'@
+
+if ($program -match $identityPattern) {
+
+    $program = [regex]::Replace(
+        $program,
+        $identityPattern,
+        $identityReplacement
+    )
+}
+else {
+
+    # Handle a possible multiline variation.
+    $program = $program -replace `
+        'AddDefaultIdentity<IdentityUser>',
+        'AddDefaultIdentity<ApplicationUser>'
+
+    if ($program -notmatch 'AddRoles<IdentityRole>') {
+
+        $program = $program -replace `
+            '(\.AddEntityFrameworkStores<ApplicationDbContext>\(\);)',
+            ".AddRoles<IdentityRole>()`r`n.AddEntityFrameworkStores<ApplicationDbContext>();"
+    }
+}
+
+# ------------------------------------------------------------
+# Enable Razor Runtime Compilation
+# ------------------------------------------------------------
+
+if ($program -match 'builder\.Services\.AddControllersWithViews\(\);') {
+
+    $program = $program -replace `
+        'builder\.Services\.AddControllersWithViews\(\);',
+        'builder.Services.AddControllersWithViews().AddRazorRuntimeCompilation();'
+}
+
+# ------------------------------------------------------------
+# Ensure Razor Pages are registered
+# ------------------------------------------------------------
+
+if ($program -notmatch 'builder\.Services\.AddRazorPages\(\);') {
+
+    $program = $program -replace `
+        '(builder\.Services\.AddControllersWithViews[^;]*;)',
+        "`$1`r`nbuilder.Services.AddRazorPages();"
+}
+
+# ============================================================
+# 8. REMOVE OLD ADMIN SEED IF PRESENT
+# ============================================================
+
+$program = [regex]::Replace(
+    $program,
+    '(?s)\r?\nusing \(var scope = app\.Services\.CreateScope\(\)\).*?(?=\r?\napp\.Run\(\);)',
+    ''
+)
+
+# ============================================================
+# 9. ADD ADMIN ROLE + CUSTOM ADMIN USER
+# ============================================================
+
+Write-Host ""
+Write-Host "Adding Admin role/user seeding..." -ForegroundColor Cyan
+
+$seedCode = @"
+
+using (var scope = app.Services.CreateScope())
+{
+    var services = scope.ServiceProvider;
+
+    var roleManager =
+        services.GetRequiredService<RoleManager<IdentityRole>>();
+
+    var userManager =
+        services.GetRequiredService<UserManager<ApplicationUser>>();
+
+    const string adminRole = "$adminRole";
+    const string adminEmail = "$adminEmail";
+    const string adminPassword = "$adminPassword";
+
+    // --------------------------------------------------------
+    // Create Admin role
+    // --------------------------------------------------------
+
+    if (!await roleManager.RoleExistsAsync(adminRole))
+    {
+        var roleResult =
+            await roleManager.CreateAsync(
+                new IdentityRole(adminRole));
+
+        if (!roleResult.Succeeded)
+        {
+            throw new Exception(
+                "Failed to create Admin role: " +
+                string.Join(
+                    ", ",
+                    roleResult.Errors.Select(e => e.Description)));
+        }
+    }
+
+    // --------------------------------------------------------
+    // Find Admin user
+    // --------------------------------------------------------
+
+    var adminUser =
+        await userManager.FindByEmailAsync(adminEmail);
+
+    // --------------------------------------------------------
+    // Create Admin user
+    // --------------------------------------------------------
+
+    if (adminUser == null)
+    {
+        adminUser = new ApplicationUser
+        {
+            UserName = adminEmail,
+            Email = adminEmail,
+            EmailConfirmed = true,
+
+            FirstName = "System",
+            LastName = "Administrator",
+            DisplayName = "Administrator"
+        };
+
+        var userResult =
+            await userManager.CreateAsync(
+                adminUser,
+                adminPassword);
+
+        if (!userResult.Succeeded)
+        {
+            throw new Exception(
+                "Failed to create Admin user: " +
+                string.Join(
+                    ", ",
+                    userResult.Errors.Select(e => e.Description)));
+        }
+    }
+
+    // --------------------------------------------------------
+    // Ensure Admin role is assigned
+    // --------------------------------------------------------
+
+    if (!await userManager.IsInRoleAsync(
+        adminUser,
+        adminRole))
+    {
+        var roleResult =
+            await userManager.AddToRoleAsync(
+                adminUser,
+                adminRole);
+
+        if (!roleResult.Succeeded)
+        {
+            throw new Exception(
+                "Failed to assign Admin role: " +
+                string.Join(
+                    ", ",
+                    roleResult.Errors.Select(e => e.Description)));
+        }
+    }
+}
+"@
+
+$program = $program -replace `
+    'app\.Run\(\);',
+    ($seedCode + "`r`napp.Run();")
+
+Set-Content `
+    -Path $programPath `
+    -Value $program `
+    -Encoding UTF8
+
+# ============================================================
+# 10. RESTORE
+# ============================================================
+
+Write-Host ""
+Write-Host "Restoring packages..." -ForegroundColor Cyan
+
+dotnet restore
+
+if ($LASTEXITCODE -ne 0) {
+    throw "Package restore failed."
+}
+
+# ============================================================
+# 11. BUILD BEFORE IDENTITY SCAFFOLDING
+# ============================================================
+
+Write-Host ""
+Write-Host "Building before Identity scaffolding..." -ForegroundColor Cyan
+
+dotnet build --no-restore
+
+if ($LASTEXITCODE -ne 0) {
+    throw "Initial build failed."
+}
+
+# ============================================================
+# 12. SCAFFOLD IDENTITY
+# ============================================================
+
+Write-Host ""
+Write-Host "Scaffolding Identity..." -ForegroundColor Cyan
+
+# The custom ApplicationUser is already connected to
+# ApplicationDbContext, so the scaffolder can infer the
+# user type from the context.
+
+dotnet aspnet-codegenerator identity `
+    -dc "$rootNamespace.Data.ApplicationDbContext" `
+    --force
+
+if ($LASTEXITCODE -ne 0) {
+    throw "Identity scaffolding failed."
+}
+
+# ============================================================
+# 13. MODIFY REGISTER PAGE
+# ============================================================
+
+Write-Host ""
+Write-Host "Customizing Identity registration page..." -ForegroundColor Cyan
+
+$identityAccountPath = "Areas\Identity\Pages\Account"
+
+if (-not (Test-Path $identityAccountPath)) {
+    throw "Identity Account folder was not generated."
+}
+
+# ------------------------------------------------------------
+# Register.cshtml.cs
+# ------------------------------------------------------------
+
+$registerCs = @"
+using System.ComponentModel.DataAnnotations;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.RazorPages;
+using $rootNamespace.Data;
+
+namespace $rootNamespace.Areas.Identity.Pages.Account;
+
+public class RegisterModel : PageModel
+{
+    private readonly SignInManager<ApplicationUser> _signInManager;
+    private readonly UserManager<ApplicationUser> _userManager;
+    private readonly IUserStore<ApplicationUser> _userStore;
+    private readonly IUserEmailStore<ApplicationUser> _emailStore;
+    private readonly ILogger<RegisterModel> _logger;
+
+    public RegisterModel(
+        UserManager<ApplicationUser> userManager,
+        IUserStore<ApplicationUser> userStore,
+        SignInManager<ApplicationUser> signInManager,
+        ILogger<RegisterModel> logger)
+    {
+        _userManager = userManager;
+        _userStore = userStore;
+        _emailStore =
+            GetEmailStore(userManager);
+
+        _signInManager = signInManager;
+        _logger = logger;
+    }
+
+    [BindProperty]
+    public InputModel Input { get; set; } = new();
+
+    public IList<AuthenticationScheme> ExternalLogins { get; set; }
+        = new List<AuthenticationScheme>();
+
+    public string? ReturnUrl { get; set; }
+
+    public class InputModel
+    {
+        [Required]
+        [Display(Name = "First name")]
+        [StringLength(100)]
+        public string FirstName { get; set; } = string.Empty;
+
+        [Required]
+        [Display(Name = "Last name")]
+        [StringLength(100)]
+        public string LastName { get; set; } = string.Empty;
+
+        [Display(Name = "Display name")]
+        [StringLength(150)]
+        public string? DisplayName { get; set; }
+
+        [Required]
+        [EmailAddress]
+        [Display(Name = "Email")]
+        public string Email { get; set; } = string.Empty;
+
+        [Phone]
+        [Display(Name = "Phone number")]
+        public string? PhoneNumber { get; set; }
+
+        [Required]
+        [StringLength(
+            100,
+            ErrorMessage =
+                "The {0} must be at least {2} and at most {1} characters long.",
+            MinimumLength = 6)]
+        [DataType(DataType.Password)]
+        [Display(Name = "Password")]
+        public string Password { get; set; } = string.Empty;
+
+        [DataType(DataType.Password)]
+        [Display(Name = "Confirm password")]
+        [Compare(
+            "Password",
+            ErrorMessage =
+                "The password and confirmation password do not match.")]
+        public string ConfirmPassword { get; set; } = string.Empty;
+    }
+
+    public async Task OnGetAsync(string? returnUrl = null)
+    {
+        ReturnUrl = returnUrl;
+
+        ExternalLogins =
+            (await _signInManager.GetExternalAuthenticationSchemesAsync())
+            .ToList();
+    }
+
+    public async Task<IActionResult> OnPostAsync(
+        string? returnUrl = null)
+    {
+        ReturnUrl = returnUrl;
+
+        ExternalLogins =
+            (await _signInManager.GetExternalAuthenticationSchemesAsync())
+            .ToList();
+
+        if (!ModelState.IsValid)
+        {
+            return Page();
+        }
+
+        var user = new ApplicationUser
+        {
+            UserName = Input.Email,
+            Email = Input.Email,
+            PhoneNumber =
+                string.IsNullOrWhiteSpace(Input.PhoneNumber)
+                    ? null
+                    : Input.PhoneNumber.Trim(),
+            FirstName = Input.FirstName,
+            LastName = Input.LastName,
+            DisplayName =
+                string.IsNullOrWhiteSpace(Input.DisplayName)
+                    ? $"{Input.FirstName} {Input.LastName}".Trim()
+                    : Input.DisplayName.Trim()
+        };
+
+        await _userStore.SetUserNameAsync(
+            user,
+            Input.Email,
+            CancellationToken.None);
+
+        await _emailStore.SetEmailAsync(
+            user,
+            Input.Email,
+            CancellationToken.None);
+
+        var result =
+            await _userManager.CreateAsync(
+                user,
+                Input.Password);
+
+        if (result.Succeeded)
+        {
+            _logger.LogInformation(
+                "User created a new account with password.");
+
+            // Automatically assign normal users the User role
+            // if it exists.
+            if (await _userManager.IsInRoleAsync(
+                user,
+                "User") == false)
+            {
+                // Role assignment is optional. Admin is seeded
+                // separately.
+            }
+
+            await _signInManager.SignInAsync(
+                user,
+                isPersistent: false);
+
+            // Shown as a Notyf toast by the global notification layer.
+            TempData["Success"] =
+                "Welcome, " + user.DisplayName + "! Your account has been created.";
+
+            return LocalRedirect(
+                returnUrl ?? "/");
+        }
+
+        foreach (var error in result.Errors)
+        {
+            ModelState.AddModelError(
+                string.Empty,
+                error.Description);
+        }
+
+        return Page();
+    }
+
+    private IUserEmailStore<ApplicationUser> GetEmailStore(
+        UserManager<ApplicationUser> userManager)
+    {
+        if (!userManager.SupportsUserEmail)
+        {
+            throw new NotSupportedException(
+                "The default UI requires a user store with email support.");
+        }
+
+        return (IUserEmailStore<ApplicationUser>)_userStore;
+    }
+}
+"@
+
+Set-Content `
+    -Path "$identityAccountPath\Register.cshtml.cs" `
+    -Value $registerCs `
+    -Encoding UTF8
+
+# ------------------------------------------------------------
+# Register.cshtml
+# ------------------------------------------------------------
+
+$registerView = @'
+@page
+@model RegisterModel
+
+@{
+    ViewData["Title"] = "Create account";
+}
+
+<div class="container py-5">
+    <div class="row justify-content-center">
+        <div class="col-12 col-md-8 col-lg-6">
+
+            <div class="card border-0 shadow-sm animate__animated animate__fadeInUp">
+                <div class="card-body p-4 p-md-5">
+
+                    <div class="text-center mb-4">
+                        <div class="auth-icon mb-3">
+                            <i class="fa-solid fa-user-plus"></i>
+                        </div>
+
+                        <h1 class="h3 fw-bold">
+                            Create your account
+                        </h1>
+
+                        <p class="text-muted mb-0">
+                            Enter your information to get started.
+                        </p>
+                    </div>
+
+                    <form
+                        id="registerForm"
+                        asp-route-returnUrl="@Model.ReturnUrl"
+                        method="post">
+
+                        <div asp-validation-summary="ModelOnly"
+                             class="text-danger mb-3"
+                             role="alert">
+                        </div>
+
+                        <div class="row g-3">
+
+                            <div class="col-md-6">
+                                <label asp-for="Input.FirstName"
+                                       class="form-label">
+                                    First name
+                                </label>
+
+                                <div class="input-group">
+                                    <span class="input-group-text">
+                                        <i class="fa-solid fa-user"></i>
+                                    </span>
+                                    <input asp-for="Input.FirstName"
+                                           class="form-control"
+                                           autocomplete="given-name" />
+                                </div>
+
+                                <span asp-validation-for="Input.FirstName"
+                                      class="text-danger">
+                                </span>
+                            </div>
+
+                            <div class="col-md-6">
+                                <label asp-for="Input.LastName"
+                                       class="form-label">
+                                    Last name
+                                </label>
+
+                                <div class="input-group">
+                                    <span class="input-group-text">
+                                        <i class="fa-solid fa-user"></i>
+                                    </span>
+                                    <input asp-for="Input.LastName"
+                                           class="form-control"
+                                           autocomplete="family-name" />
+                                </div>
+
+                                <span asp-validation-for="Input.LastName"
+                                      class="text-danger">
+                                </span>
+                            </div>
+
+                            <div class="col-12">
+                                <label asp-for="Input.DisplayName"
+                                       class="form-label">
+                                    Display name
+                                    <span class="text-muted">
+                                        (optional)
+                                    </span>
+                                </label>
+
+                                <div class="input-group">
+                                    <span class="input-group-text">
+                                        <i class="fa-solid fa-id-badge"></i>
+                                    </span>
+                                    <input asp-for="Input.DisplayName"
+                                           class="form-control"
+                                           autocomplete="nickname" />
+                                </div>
+
+                                <span asp-validation-for="Input.DisplayName"
+                                      class="text-danger">
+                                </span>
+                            </div>
+
+                            <div class="col-12">
+                                <label asp-for="Input.Email"
+                                       class="form-label">
+                                    Email
+                                </label>
+
+                                <div class="input-group">
+                                    <span class="input-group-text">
+                                        <i class="fa-solid fa-envelope"></i>
+                                    </span>
+                                    <input asp-for="Input.Email"
+                                           class="form-control"
+                                           autocomplete="email"
+                                           aria-required="true" />
+                                </div>
+
+                                <span asp-validation-for="Input.Email"
+                                      class="text-danger">
+                                </span>
+                            </div>
+
+                            <div class="col-12">
+                                <label asp-for="Input.PhoneNumber"
+                                       class="form-label">
+                                    Phone number
+                                    <span class="text-muted">
+                                        (optional)
+                                    </span>
+                                </label>
+
+                                <input asp-for="Input.PhoneNumber"
+                                       type="tel"
+                                       class="form-control"
+                                       data-intl-tel
+                                       autocomplete="tel" />
+
+                                <span asp-validation-for="Input.PhoneNumber"
+                                      class="text-danger">
+                                </span>
+                            </div>
+
+                            <div class="col-md-6">
+                                <label asp-for="Input.Password"
+                                       class="form-label">
+                                    Password
+                                </label>
+
+                                <div class="input-group">
+                                    <span class="input-group-text">
+                                        <i class="fa-solid fa-lock"></i>
+                                    </span>
+                                    <input asp-for="Input.Password"
+                                           class="form-control"
+                                           autocomplete="new-password"
+                                           aria-required="true" />
+                                    <button type="button"
+                                            class="btn btn-outline-secondary toggle-password"
+                                            tabindex="-1"
+                                            aria-label="Show or hide password">
+                                        <i class="fa-solid fa-eye"></i>
+                                    </button>
+                                </div>
+
+                                <span asp-validation-for="Input.Password"
+                                      class="text-danger">
+                                </span>
+                            </div>
+
+                            <div class="col-md-6">
+                                <label asp-for="Input.ConfirmPassword"
+                                       class="form-label">
+                                    Confirm password
+                                </label>
+
+                                <div class="input-group">
+                                    <span class="input-group-text">
+                                        <i class="fa-solid fa-lock"></i>
+                                    </span>
+                                    <input asp-for="Input.ConfirmPassword"
+                                           class="form-control"
+                                           autocomplete="new-password"
+                                           aria-required="true" />
+                                    <button type="button"
+                                            class="btn btn-outline-secondary toggle-password"
+                                            tabindex="-1"
+                                            aria-label="Show or hide password">
+                                        <i class="fa-solid fa-eye"></i>
+                                    </button>
+                                </div>
+
+                                <span asp-validation-for="Input.ConfirmPassword"
+                                      class="text-danger">
+                                </span>
+                            </div>
+
+                            <div class="col-12 mt-4">
+                                <button
+                                    id="registerSubmit"
+                                    type="submit"
+                                    class="w-100 btn btn-primary btn-lg">
+                                    <i class="fa-solid fa-user-plus me-2"></i>
+                                    Create account
+                                </button>
+                            </div>
+
+                        </div>
+
+                    </form>
+
+                    <div class="text-center mt-4">
+                        <span class="text-muted">
+                            Already have an account?
+                        </span>
+
+                        <a
+                            asp-page="./Login"
+                            asp-route-returnUrl="@Model.ReturnUrl">
+                            <i class="fa-solid fa-right-to-bracket me-1"></i>
+                            Sign in
+                        </a>
+                    </div>
+
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
+}
+'@
+
+Set-Content `
+    -Path "$identityAccountPath\Register.cshtml" `
+    -Value $registerView `
+    -Encoding UTF8
+
+# ============================================================
+# 14. CREATE CUSTOM USER DROPDOWN
+# ============================================================
+
+Write-Host ""
+Write-Host "Creating user dropdown..." -ForegroundColor Cyan
+
+$sharedPath = "Views\Shared"
+
+if (-not (Test-Path $sharedPath)) {
+    New-Item `
+        -ItemType Directory `
+        -Path $sharedPath `
+        -Force | Out-Null
+}
+
+$loginPartial = @"
+@using Microsoft.AspNetCore.Identity
+@using $rootNamespace.Data
+
+@inject SignInManager<ApplicationUser> SignInManager
+@inject UserManager<ApplicationUser> UserManager
+
+<ul class="navbar-nav ms-auto">
+
+@if (SignInManager.IsSignedIn(User))
+{
+    var currentUser =
+        await UserManager.GetUserAsync(User);
+
+    var displayName =
+        currentUser?.DisplayName;
+
+    if (string.IsNullOrWhiteSpace(displayName))
+    {
+        displayName =
+            `$"{currentUser?.FirstName} {currentUser?.LastName}".Trim();
+    }
+
+    if (string.IsNullOrWhiteSpace(displayName))
+    {
+        displayName =
+            currentUser?.Email
+            ?? User.Identity?.Name
+            ?? "User";
+    }
+
+    var firstLetter =
+        displayName.Length > 0
+            ? displayName.Substring(0, 1).ToUpper()
+            : "U";
+
+    <li class="nav-item dropdown">
+
+        <a class="nav-link dropdown-toggle user-dropdown-toggle d-flex align-items-center gap-2"
+           href="#"
+           id="userDropdown"
+           role="button"
+           data-bs-toggle="dropdown"
+           aria-expanded="false">
+
+            <span
+                class="d-inline-flex align-items-center justify-content-center rounded-circle bg-primary text-white"
+                style="width:34px;height:34px;font-size:14px;">
+
+                @firstLetter
+
+            </span>
+
+            <span class="d-none d-md-inline">
+                @displayName
+            </span>
+
+            <i class="fa-solid fa-chevron-down dropdown-chevron"></i>
+
+        </a>
+
+        <ul class="dropdown-menu dropdown-menu-end shadow"
+            aria-labelledby="userDropdown">
+
+            <li>
+                <div class="dropdown-header">
+
+                    <div class="fw-semibold">
+                        @displayName
+                    </div>
+
+                    <small class="text-muted">
+                        @currentUser?.Email
+                    </small>
+
+                </div>
+            </li>
+
+            <li>
+                <hr class="dropdown-divider" />
+            </li>
+
+            <li>
+                <a class="dropdown-item"
+                   asp-area="Identity"
+                   asp-page="/Account/Manage/Index">
+
+                    <i class="fa-solid fa-user-gear fa-fw me-2"></i>
+                    Manage Account
+
+                </a>
+            </li>
+
+            @if (User.IsInRole("Admin"))
+            {
+                <li>
+
+                    <a class="dropdown-item"
+                       asp-controller="Admin"
+                       asp-action="Index">
+
+                        <i class="fa-solid fa-gauge-high fa-fw me-2"></i>
+                        Admin Dashboard
+
+                    </a>
+
+                </li>
+            }
+
+            <li>
+                <hr class="dropdown-divider" />
+            </li>
+
+            <li>
+
+                <form
+                    asp-area="Identity"
+                    asp-page="/Account/Logout"
+                    asp-route-returnUrl="/"
+                    method="post"
+                    class="px-2"
+                    data-swal-title="Log out?"
+                    data-swal-confirm="You will be signed out of your account."
+                    data-swal-icon="question"
+                    data-swal-confirm-text="Yes, log out"
+                    data-swal-confirm-icon="fa-right-from-bracket">
+
+                    <button
+                        type="submit"
+                        class="dropdown-item text-danger">
+
+                        <i class="fa-solid fa-right-from-bracket fa-fw me-2"></i>
+                        Logout
+
+                    </button>
+
+                </form>
+
+            </li>
+
+        </ul>
+
+    </li>
+}
+else
+{
+    <li class="nav-item">
+
+        <a class="nav-link"
+           asp-area="Identity"
+           asp-page="/Account/Register">
+
+            <i class="fa-solid fa-user-plus me-1"></i>
+            Register
+
+        </a>
+
+    </li>
+
+    <li class="nav-item">
+
+        <a class="nav-link"
+           asp-area="Identity"
+           asp-page="/Account/Login">
+
+            <i class="fa-solid fa-right-to-bracket me-1"></i>
+            Login
+
+        </a>
+
+    </li>
+}
+
+</ul>
+"@
+
+Set-Content `
+    -Path "$sharedPath\_LoginPartial.cshtml" `
+    -Value $loginPartial `
+    -Encoding UTF8
+
+# ============================================================
+# 15. ENSURE NAVBAR HAS LOGIN PARTIAL
+# ============================================================
+
+Write-Host ""
+Write-Host "Configuring navbar..." -ForegroundColor Cyan
+
+$layoutPath = "Views\Shared\_Layout.cshtml"
+
+if (Test-Path $layoutPath) {
+
+    $layout = Get-Content $layoutPath -Raw
+
+    if ($layout -notmatch '_LoginPartial') {
+
+        # Insert before the closing </ul> of the navbar.
+        # This targets the first navbar list.
+        $navbarPattern =
+            '(?s)(<ul\s+class="navbar-nav[^>]*>.*?)(</ul>)'
+
+        if ($layout -match $navbarPattern) {
+
+            $layout = [regex]::Replace(
+                $layout,
+                $navbarPattern,
+                '$1' +
+                "`r`n                <partial name=""_LoginPartial"" />" +
+                "`r`n            $2",
+                1
+            )
+        }
+    }
+
+    Set-Content `
+        -Path $layoutPath `
+        -Value $layout `
+        -Encoding UTF8
+}
+
+# ============================================================
+# 16. FRONT-END LIBRARIES + GLOBAL UI LAYER
+#     (Font Awesome 7, Animate.css, AOS, DataTables 3, Select2,
+#      SweetAlert2, Notyf, intl-tel-input, Flatpickr)
+# ============================================================
+
+Write-Host ""
+Write-Host "Adding front-end libraries and global UI layer..." -ForegroundColor Cyan
+
+# Helper: insert text in front of the first pattern that matches.
+function Insert-BeforeFirstMatch {
+    param(
+        [string]$Text,
+        [string[]]$Patterns,
+        [string]$Insert
+    )
+
+    foreach ($pattern in $Patterns) {
+
+        $match = [regex]::Match($Text, $pattern)
+
+        if ($match.Success) {
+            return $Text.Insert(
+                $match.Index,
+                $Insert + "`r`n        ")
+        }
+    }
+
+    return $Text
+}
+
+$sharedPath = "Views\Shared"
+
+if (-not (Test-Path $sharedPath)) {
+    New-Item -ItemType Directory -Path $sharedPath -Force | Out-Null
+}
+
+# ------------------------------------------------------------
+# 16.1 _LibraryStyles partial (CSS from CDNs)
+#
+# URLs live in C# string constants because Razor would
+# otherwise treat "@fortawesome" as a code transition.
+#
+# Version policy:
+#   - jsDelivr links use a major-version range (e.g. @7, @11)
+#     so you always get the newest release of that major.
+#   - DataTables' own CDN has no ranges, so 3.1.2 (current
+#     stable at time of writing) is pinned.
+#   - Select2 4.1.0-rc.0 is pinned because ranges skip
+#     pre-releases and 4.1 is the Bootstrap-5-compatible line.
+# ------------------------------------------------------------
+
+$libraryStyles = @'
+@* Third-party CSS (CDN). Loaded before site.css so site.css can override. *@
+@{
+    const string FontAwesomeCss  = "https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@7/css/all.min.css";
+    const string AnimateCss      = "https://cdn.jsdelivr.net/npm/animate.css@4/animate.min.css";
+    const string AosCss          = "https://cdn.jsdelivr.net/npm/aos@2.3.4/dist/aos.css";
+    const string DataTablesCss   = "https://cdn.datatables.net/3.1.2/css/dataTables.bootstrap5.min.css";
+    const string Select2Css      = "https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css";
+    const string Select2ThemeCss = "https://cdn.jsdelivr.net/npm/select2-bootstrap-5-theme@1.3.0/dist/select2-bootstrap-5-theme.min.css";
+    const string NotyfCss        = "https://cdn.jsdelivr.net/npm/notyf@3/notyf.min.css";
+    const string IntlTelInputCss = "https://cdn.jsdelivr.net/npm/intl-tel-input@26/build/css/intlTelInput.css";
+    const string FlatpickrCss    = "https://cdn.jsdelivr.net/npm/flatpickr@4/dist/flatpickr.min.css";
+}
+
+<link rel="stylesheet" href="@FontAwesomeCss" />
+<link rel="stylesheet" href="@AnimateCss" />
+<link rel="stylesheet" href="@AosCss" />
+<link rel="stylesheet" href="@DataTablesCss" />
+<link rel="stylesheet" href="@Select2Css" />
+<link rel="stylesheet" href="@Select2ThemeCss" />
+<link rel="stylesheet" href="@NotyfCss" />
+<link rel="stylesheet" href="@IntlTelInputCss" />
+<link rel="stylesheet" href="@FlatpickrCss" />
+'@
+
+Set-Content `
+    -Path "$sharedPath\_LibraryStyles.cshtml" `
+    -Value $libraryStyles `
+    -Encoding UTF8
+
+# ------------------------------------------------------------
+# 16.2 _LibraryScripts partial (JS from CDNs)
+#
+# SweetAlert2's "all" bundle already contains its CSS.
+# jQuery is loaded by _Layout BEFORE this partial (Select2
+# needs it).
+# ------------------------------------------------------------
+
+$libraryScripts = @'
+@* Third-party JS (CDN). Must come after jQuery + Bootstrap and before site.js. *@
+@{
+    const string SweetAlertJs    = "https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.all.min.js";
+    const string NotyfJs         = "https://cdn.jsdelivr.net/npm/notyf@3/notyf.min.js";
+    const string AosJs           = "https://cdn.jsdelivr.net/npm/aos@2.3.4/dist/aos.js";
+    const string DataTablesJs    = "https://cdn.datatables.net/3.1.2/js/dataTables.min.js";
+    const string DataTablesBs5Js = "https://cdn.datatables.net/3.1.2/js/dataTables.bootstrap5.min.js";
+    const string Select2Js       = "https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js";
+    const string FlatpickrJs     = "https://cdn.jsdelivr.net/npm/flatpickr@4/dist/flatpickr.min.js";
+    const string IntlTelInputJs  = "https://cdn.jsdelivr.net/npm/intl-tel-input@26/build/js/intlTelInput.min.js";
+    const string IntlTelUtilsJs  = "https://cdn.jsdelivr.net/npm/intl-tel-input@26/build/js/utils.js";
+}
+
+<partial name="_Notifications" />
+
+<script src="@SweetAlertJs"></script>
+<script src="@NotyfJs"></script>
+<script src="@AosJs"></script>
+<script src="@DataTablesJs"></script>
+<script src="@DataTablesBs5Js"></script>
+<script src="@Select2Js"></script>
+<script src="@FlatpickrJs"></script>
+<script src="@IntlTelInputJs"></script>
+<script>
+    window.AppLibs = { intlTelUtils: "@Html.Raw(IntlTelUtilsJs)" };
+</script>
+'@
+
+Set-Content `
+    -Path "$sharedPath\_LibraryScripts.cshtml" `
+    -Value $libraryScripts `
+    -Encoding UTF8
+
+# ------------------------------------------------------------
+# 16.3 _Notifications partial (server -> Notyf bridge)
+#
+# Controllers / Razor Pages just set:
+#   TempData["Success"] / ["Error"] / ["Warning"] / ["Info"]
+# and a Notyf toast appears on the next page.
+# ------------------------------------------------------------
+
+$notificationsPartial = @'
+@{
+    var toasts = new List<(string Type, string? Message)>
+    {
+        ("success", TempData["Success"] as string),
+        ("error",   TempData["Error"]   as string),
+        ("warning", TempData["Warning"] as string),
+        ("info",    TempData["Info"]    as string)
+    };
+}
+
+@foreach (var toast in toasts)
+{
+    if (!string.IsNullOrWhiteSpace(toast.Message))
+    {
+        <div class="d-none"
+             data-notyf-type="@toast.Type"
+             data-notyf-message="@toast.Message"></div>
+    }
+}
+'@
+
+Set-Content `
+    -Path "$sharedPath\_Notifications.cshtml" `
+    -Value $notificationsPartial `
+    -Encoding UTF8
+
+# ------------------------------------------------------------
+# 16.4 site.css additions
+# ------------------------------------------------------------
+
+$siteCssPath = "wwwroot\css\site.css"
+
+$siteCssAdditions = @'
+
+/* ============================================================
+   Global UI layer (Font Awesome / AOS / Notyf / SweetAlert2 ...)
+   ============================================================ */
+
+/* User dropdown: replace Bootstrap's triangle caret with a
+   Font Awesome chevron that rotates when the menu opens. */
+.user-dropdown-toggle::after {
+    display: none !important;
+}
+
+.user-dropdown-toggle .dropdown-chevron {
+    font-size: .7rem;
+    transition: transform .25s ease;
+}
+
+.user-dropdown-toggle.show .dropdown-chevron,
+.user-dropdown-toggle[aria-expanded="true"] .dropdown-chevron {
+    transform: rotate(180deg);
+}
+
+/* Round icon badge used on auth pages */
+.auth-icon {
+    width: 64px;
+    height: 64px;
+    margin: 0 auto;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.6rem;
+    color: #0d6efd;
+    background: rgba(13, 110, 253, .1);
+}
+
+/* Card hover effect */
+.hover-lift {
+    transition: transform .2s ease, box-shadow .2s ease;
+}
+
+.hover-lift:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 .75rem 1.5rem rgba(0, 0, 0, .12) !important;
+}
+
+/* intl-tel-input should fill its column like other inputs */
+.iti {
+    width: 100%;
+}
+
+/* Notyf icon size (Font Awesome icons) */
+.notyf__icon i {
+    font-size: 1.25rem;
+}
+
+/* SweetAlert2 inherits the site font */
+.swal2-popup {
+    font-family: inherit;
+}
+
+/* Keep icons aligned inside buttons, links and nav items */
+.btn i,
+.nav-link i,
+.dropdown-item i {
+    vertical-align: -0.05em;
+}
+'@
+
+if (-not (Test-Path "wwwroot\css")) {
+    New-Item -ItemType Directory -Path "wwwroot\css" -Force | Out-Null
+}
+
+if (Test-Path $siteCssPath) {
+    Add-Content -Path $siteCssPath -Value $siteCssAdditions -Encoding UTF8
+}
+else {
+    Set-Content -Path $siteCssPath -Value $siteCssAdditions -Encoding UTF8
+}
+
+# ------------------------------------------------------------
+# 16.5 site.js (initialises every library)
+# ------------------------------------------------------------
+
+$siteJs = @'
+// ============================================================
+// Global UI layer
+//   Notyf          -> toast notifications
+//   SweetAlert2    -> confirmation dialogs
+//   AOS            -> scroll animations
+//   DataTables 3   -> table.datatable
+//   Select2        -> select.select2
+//   Flatpickr      -> input[data-flatpickr]
+//   intl-tel-input -> input[data-intl-tel]
+//   Font Awesome 7 -> automatic icons for scaffolded pages
+// ============================================================
+
+(function () {
+    'use strict';
+
+    // --------------------------------------------------------
+    // Notyf
+    // --------------------------------------------------------
+
+    const notyf = window.Notyf
+        ? new Notyf({
+            duration: 4500,
+            ripple: true,
+            dismissible: true,
+            position: { x: 'right', y: 'top' },
+            types: [
+                {
+                    type: 'success',
+                    background: '#198754',
+                    icon: { className: 'fa-solid fa-circle-check', tagName: 'i' }
+                },
+                {
+                    type: 'error',
+                    background: '#dc3545',
+                    duration: 6500,
+                    icon: { className: 'fa-solid fa-circle-xmark', tagName: 'i' }
+                },
+                {
+                    type: 'info',
+                    background: '#0d6efd',
+                    icon: { className: 'fa-solid fa-circle-info', tagName: 'i' }
+                },
+                {
+                    type: 'warning',
+                    background: '#d39e00',
+                    icon: { className: 'fa-solid fa-triangle-exclamation', tagName: 'i' }
+                }
+            ]
+        })
+        : null;
+
+    const notify = {
+        success: function (message) { if (notyf) notyf.open({ type: 'success', message: message }); },
+        error:   function (message) { if (notyf) notyf.open({ type: 'error',   message: message }); },
+        info:    function (message) { if (notyf) notyf.open({ type: 'info',    message: message }); },
+        warning: function (message) { if (notyf) notyf.open({ type: 'warning', message: message }); }
+    };
+
+    // Available to any page script: AppNotify.success("Saved!")
+    window.AppNotify = notify;
+
+    function showServerMessages() {
+
+        // TempData["Success" | "Error" | "Warning" | "Info"] and
+        // Identity's StatusMessage are rendered as hidden elements.
+        document.querySelectorAll('[data-notyf-message]').forEach(function (el) {
+
+            const message = el.getAttribute('data-notyf-message');
+            const type = el.getAttribute('data-notyf-type') || 'info';
+
+            if (message) {
+                (notify[type] || notify.info)(message);
+            }
+
+            el.remove();
+        });
+
+        // Model-level validation errors (e.g. "Invalid login attempt.")
+        let shown = 0;
+
+        document.querySelectorAll('.validation-summary-errors li').forEach(function (li) {
+
+            const text = (li.textContent || '').trim();
+
+            if (text && shown < 3) {
+                notify.error(text);
+                shown++;
+            }
+        });
+    }
+
+    // --------------------------------------------------------
+    // SweetAlert2
+    // --------------------------------------------------------
+
+    function esc(value) {
+        const div = document.createElement('div');
+        div.textContent = value == null ? '' : String(value);
+        return div.innerHTML;
+    }
+
+    const swalBase = window.Swal
+        ? Swal.mixin({
+            buttonsStyling: false,
+            reverseButtons: true,
+            showClass: { popup: 'animate__animated animate__fadeInDown animate__faster' },
+            hideClass: { popup: 'animate__animated animate__fadeOutUp animate__faster' }
+        })
+        : null;
+
+    function confirmDialog(options) {
+
+        const danger = !!options.danger;
+
+        return swalBase.fire({
+            title: options.title || 'Are you sure?',
+            text: options.text || '',
+            icon: options.icon || 'warning',
+            showCancelButton: true,
+            confirmButtonText:
+                '<i class="fa-solid ' + esc(options.confirmIcon || 'fa-check') + ' me-2"></i>' +
+                esc(options.confirmText || 'Yes, continue'),
+            cancelButtonText:
+                '<i class="fa-solid fa-xmark me-2"></i>Cancel',
+            customClass: {
+                confirmButton: 'btn ' + (danger ? 'btn-danger' : 'btn-primary') + ' mx-1',
+                cancelButton: 'btn btn-outline-secondary mx-1'
+            }
+        });
+    }
+
+    // Available to any page script: AppConfirm({ title: ... }).then(...)
+    window.AppConfirm = confirmDialog;
+
+    // Confirmation rules for the scaffolded Identity pages, so
+    // they get dialogs without editing the generated markup.
+    const confirmRules = [
+        {
+            path: '/manage/deletepersonaldata',
+            selector: 'button[type="submit"]',
+            title: 'Delete your account?',
+            text: 'This permanently deletes your account and personal data. This cannot be undone.',
+            icon: 'warning',
+            confirmText: 'Yes, delete it',
+            confirmIcon: 'fa-trash-can',
+            danger: true
+        },
+        {
+            path: '/manage/resetauthenticator',
+            selector: 'button[type="submit"]',
+            title: 'Reset authenticator key?',
+            text: 'You will need to set up your authenticator app again with the new key.',
+            icon: 'warning',
+            confirmText: 'Yes, reset it',
+            confirmIcon: 'fa-rotate',
+            danger: true
+        },
+        {
+            path: '/manage/disable2fa',
+            selector: 'button[type="submit"]',
+            title: 'Disable two-factor authentication?',
+            text: 'Your account will be less secure without 2FA.',
+            icon: 'warning',
+            confirmText: 'Yes, disable 2FA',
+            confirmIcon: 'fa-shield-halved',
+            danger: true
+        },
+        {
+            path: '/manage/externallogins',
+            selector: 'button[type="submit"]',
+            textMatch: /^\s*remove/i,
+            title: 'Remove this login?',
+            text: 'You will no longer be able to sign in with this external provider.',
+            icon: 'warning',
+            confirmText: 'Yes, remove it',
+            confirmIcon: 'fa-link-slash',
+            danger: true
+        }
+    ];
+
+    // Markup-driven config: data-swal-* attributes on a form or
+    // on its submit button.
+    function resolveConfirm(form, submitter) {
+
+        let source = null;
+
+        if (submitter && submitter.dataset.swalConfirm !== undefined) {
+            source = submitter;
+        }
+        else if (form.dataset.swalConfirm !== undefined) {
+            source = form;
+        }
+
+        if (source) {
+            const d = source.dataset;
+
+            return {
+                title: d.swalTitle,
+                text: d.swalConfirm,
+                icon: d.swalIcon || 'question',
+                confirmText: d.swalConfirmText,
+                confirmIcon: d.swalConfirmIcon,
+                danger: d.swalDanger === 'true'
+            };
+        }
+
+        const path = location.pathname.toLowerCase();
+
+        for (const rule of confirmRules) {
+
+            if (path.indexOf(rule.path) === -1) continue;
+            if (!submitter || !submitter.matches(rule.selector)) continue;
+
+            if (rule.textMatch && !rule.textMatch.test(submitter.textContent || '')) continue;
+
+            return rule;
+        }
+
+        return null;
+    }
+
+    // Capture phase so we run before jquery-validation / other handlers.
+    document.addEventListener('submit', function (e) {
+
+        const form = e.target;
+
+        if (!(form instanceof HTMLFormElement) || !swalBase) return;
+
+        // Second pass, after the user confirmed.
+        if (form.dataset.swalConfirmed === 'true') {
+            delete form.dataset.swalConfirmed;
+            return;
+        }
+
+        const submitter = e.submitter || null;
+        const config = resolveConfirm(form, submitter);
+
+        if (!config) return;
+
+        // Let client-side validation run first.
+        if (window.jQuery && window.jQuery(form).data('validator') && !window.jQuery(form).valid()) {
+            e.preventDefault();
+            return;
+        }
+
+        e.preventDefault();
+
+        confirmDialog(config).then(function (result) {
+
+            if (!result.isConfirmed) return;
+
+            form.dataset.swalConfirmed = 'true';
+
+            if (submitter && submitter.form === form) {
+                form.requestSubmit(submitter);
+            }
+            else {
+                form.requestSubmit();
+            }
+        });
+
+    }, true);
+
+    // <a data-swal-confirm="..."> for GET links.
+    document.addEventListener('click', function (e) {
+
+        const link = e.target.closest ? e.target.closest('a[data-swal-confirm]') : null;
+
+        if (!link || !swalBase) return;
+
+        e.preventDefault();
+
+        confirmDialog({
+            title: link.dataset.swalTitle,
+            text: link.dataset.swalConfirm,
+            icon: link.dataset.swalIcon || 'warning',
+            confirmText: link.dataset.swalConfirmText,
+            confirmIcon: link.dataset.swalConfirmIcon,
+            danger: link.dataset.swalDanger === 'true'
+        }).then(function (result) {
+            if (result.isConfirmed) {
+                window.location.href = link.href;
+            }
+        });
+    });
+
+    // --------------------------------------------------------
+    // Show / hide password
+    // --------------------------------------------------------
+
+    document.addEventListener('click', function (e) {
+
+        const button = e.target.closest ? e.target.closest('.toggle-password') : null;
+
+        if (!button) return;
+
+        const group = button.closest('.input-group');
+        const input = group ? group.querySelector('input') : null;
+
+        if (!input) return;
+
+        const reveal = input.type === 'password';
+        input.type = reveal ? 'text' : 'password';
+
+        const icon = button.querySelector('i');
+
+        if (icon) {
+            icon.classList.toggle('fa-eye', !reveal);
+            icon.classList.toggle('fa-eye-slash', reveal);
+        }
+    });
+
+    // --------------------------------------------------------
+    // Automatic icons for pages we do not control (scaffolded
+    // Identity UI). Markup we own already contains its icons.
+    // --------------------------------------------------------
+
+    const iconRules = [
+        ['#login-submit',                 'fa-right-to-bracket'],
+        ['#forgot-password',              'fa-key'],
+        ['#resend-confirmation',          'fa-envelope-circle-check'],
+        ['main a[href*="/Account/Register"]', 'fa-user-plus'],
+        ['#profile',                      'fa-id-card'],
+        ['#email',                        'fa-envelope'],
+        ['#change-password',              'fa-key'],
+        ['#external-login',               'fa-link'],
+        ['#two-factor',                   'fa-shield-halved'],
+        ['#personal-data',                'fa-database'],
+        ['#update-profile-button',        'fa-floppy-disk'],
+        ['#change-password-button',       'fa-floppy-disk'],
+        ['#change-email-button',          'fa-floppy-disk'],
+        ['#send-verification-email-button', 'fa-paper-plane'],
+        ['#reset-authenticator-button',   'fa-rotate'],
+        ['a#delete',                      'fa-trash-can'],
+        ['a#enable-authenticator',        'fa-mobile-screen'],
+        ['a#reset-authenticator',         'fa-rotate'],
+        ['a#download',                    'fa-download']
+    ];
+
+    function hasIcon(el) {
+        return !!el.querySelector('i[class*="fa-"]');
+    }
+
+    function addIcons() {
+
+        iconRules.forEach(function (rule) {
+
+            document.querySelectorAll(rule[0]).forEach(function (el) {
+
+                if (hasIcon(el) || el.hasAttribute('data-no-icon')) return;
+
+                const icon = document.createElement('i');
+                icon.className = 'fa-solid ' + rule[1] + ' fa-fw me-2';
+                el.prepend(icon);
+            });
+        });
+
+        // Fallback: every remaining submit button gets an icon too.
+        document.querySelectorAll('main button[type="submit"]').forEach(function (button) {
+
+            if (hasIcon(button) || button.hasAttribute('data-no-icon')) return;
+            if (!(button.textContent || '').trim()) return;
+
+            const danger = button.classList.contains('btn-danger');
+            const icon = document.createElement('i');
+
+            icon.className = 'fa-solid ' + (danger ? 'fa-triangle-exclamation' : 'fa-check') + ' fa-fw me-2';
+            button.prepend(icon);
+        });
+    }
+
+    // --------------------------------------------------------
+    // Library initialisers
+    // --------------------------------------------------------
+
+    function initAos() {
+        if (window.AOS) {
+            AOS.init({ duration: 700, once: true, offset: 40 });
+        }
+    }
+
+    function initDataTables() {
+
+        if (!window.DataTable) return;
+
+        document.querySelectorAll('table.datatable, table[data-datatable]').forEach(function (table) {
+
+            if (DataTable.isDataTable(table)) return;
+
+            new DataTable(table, { pageLength: 10 });
+        });
+    }
+
+    function initSelect2() {
+
+        if (!window.jQuery || !window.jQuery.fn.select2) return;
+
+        window.jQuery('select.select2, select[data-select2]').each(function () {
+
+            const placeholder = this.getAttribute('data-placeholder');
+
+            window.jQuery(this).select2({
+                theme: 'bootstrap-5',
+                width: '100%',
+                placeholder: placeholder || undefined,
+                allowClear: !!placeholder
+            });
+        });
+    }
+
+    function initFlatpickr() {
+
+        if (!window.flatpickr) return;
+
+        document.querySelectorAll('input.flatpickr, input[data-flatpickr]').forEach(function (input) {
+
+            const mode = input.getAttribute('data-flatpickr');
+
+            const options = {
+                allowInput: true,
+                altInput: true,
+                altInputClass: input.className,
+                altFormat: 'F j, Y',
+                dateFormat: 'Y-m-d'
+            };
+
+            if (mode === 'datetime') {
+                options.enableTime = true;
+                options.altFormat = 'F j, Y h:i K';
+                options.dateFormat = 'Y-m-d H:i';
+            }
+            else if (mode === 'time') {
+                options.enableTime = true;
+                options.noCalendar = true;
+                options.altFormat = 'h:i K';
+                options.dateFormat = 'H:i';
+            }
+
+            window.flatpickr(input, options);
+        });
+    }
+
+    function initIntlTel() {
+
+        if (!window.intlTelInput) return;
+
+        document.querySelectorAll('input[data-intl-tel]').forEach(function (input) {
+
+            const utilsUrl = window.AppLibs && window.AppLibs.intlTelUtils;
+
+            const iti = window.intlTelInput(input, {
+                initialCountry: input.getAttribute('data-country') || 'us',
+                separateDialCode: true,
+                loadUtils: utilsUrl ? function () { return import(utilsUrl); } : undefined
+            });
+
+            const form = input.closest('form');
+
+            if (!form) return;
+
+            // Post the full international number (e.g. +923001234567).
+            form.addEventListener('submit', function (e) {
+
+                if (!input.value.trim()) return;
+
+                if (iti.isValidNumber() === false) {
+                    e.preventDefault();
+                    notify.error('Please enter a valid phone number.');
+                    input.focus();
+                    return;
+                }
+
+                const full = iti.getNumber();
+
+                if (full) {
+                    input.value = full;
+                }
+            });
+        });
+    }
+
+    document.addEventListener('DOMContentLoaded', function () {
+        addIcons();
+        initAos();
+        initDataTables();
+        initSelect2();
+        initFlatpickr();
+        initIntlTel();
+        showServerMessages();
+    });
+})();
+'@
+
+if (-not (Test-Path "wwwroot\js")) {
+    New-Item -ItemType Directory -Path "wwwroot\js" -Force | Out-Null
+}
+
+Set-Content `
+    -Path "wwwroot\js\site.js" `
+    -Value $siteJs `
+    -Encoding UTF8
+
+# ------------------------------------------------------------
+# 16.6 Wire the partials into _Layout.cshtml + add icons
+# ------------------------------------------------------------
+
+if (Test-Path $layoutPath) {
+
+    $layout = Get-Content $layoutPath -Raw
+
+    # CSS: before site.css so site.css can override the libraries.
+    if ($layout -notmatch '_LibraryStyles') {
+
+        $layout = Insert-BeforeFirstMatch `
+            -Text $layout `
+            -Patterns @('<link[^>]*site\.css', '</head>') `
+            -Insert '<partial name="_LibraryStyles" />'
+    }
+
+    # JS: after jQuery/Bootstrap, before site.js.
+    if ($layout -notmatch '_LibraryScripts') {
+
+        $layout = Insert-BeforeFirstMatch `
+            -Text $layout `
+            -Patterns @(
+                '<script[^>]*site\.js',
+                '@await RenderSectionAsync\("Scripts"',
+                '</body>') `
+            -Insert '<partial name="_LibraryScripts" />'
+    }
+
+    # Icons in the navbar / footer.
+    if ($layout -notmatch 'fa-house') {
+
+        $layout = $layout.Replace(
+            '>Home</a>',
+            '><i class="fa-solid fa-house me-1"></i>Home</a>')
+    }
+
+    if ($layout -notmatch 'fa-user-shield') {
+
+        $layout = $layout.Replace(
+            '>Privacy</a>',
+            '><i class="fa-solid fa-user-shield me-1"></i>Privacy</a>')
+    }
+
+    if ($layout -notmatch 'fa-layer-group') {
+
+        $layout = [regex]::Replace(
+            $layout,
+            '(<a\s+class="navbar-brand"[^>]*>)',
+            '$1<i class="fa-solid fa-layer-group me-2 text-primary"></i>',
+            1)
+    }
+
+    Set-Content `
+        -Path $layoutPath `
+        -Value $layout `
+        -Encoding UTF8
+}
+
+# ------------------------------------------------------------
+# 16.7 Home + Privacy views (icons and animations)
+# ------------------------------------------------------------
+
+$homeViewsPath = "Views\Home"
+
+if (Test-Path $homeViewsPath) {
+
+    $homeIndex = @'
+@{
+    ViewData["Title"] = "Home";
+}
+
+<div class="container py-5">
+
+    <div class="text-center mb-5">
+
+        <div class="auth-icon mb-3 animate__animated animate__bounceIn">
+            <i class="fa-solid fa-layer-group"></i>
+        </div>
+
+        <h1 class="display-5 fw-bold animate__animated animate__fadeInDown">
+            Welcome
+        </h1>
+
+        <p class="lead text-muted animate__animated animate__fadeInUp">
+            A secure ASP.NET Core MVC starter with Identity, roles and a modern UI.
+        </p>
+
+        @if (User.Identity?.IsAuthenticated != true)
+        {
+            <div class="d-flex justify-content-center gap-2 mt-4">
+
+                <a class="btn btn-primary btn-lg"
+                   asp-area="Identity"
+                   asp-page="/Account/Login">
+                    <i class="fa-solid fa-right-to-bracket me-2"></i>
+                    Sign in
+                </a>
+
+                <a class="btn btn-outline-primary btn-lg"
+                   asp-area="Identity"
+                   asp-page="/Account/Register">
+                    <i class="fa-solid fa-user-plus me-2"></i>
+                    Create account
+                </a>
+
+            </div>
+        }
+    </div>
+
+    <div class="row g-4">
+
+        <div class="col-md-4" data-aos="fade-up">
+            <div class="card border-0 shadow-sm h-100 hover-lift">
+                <div class="card-body text-center p-4">
+                    <div class="auth-icon mb-3">
+                        <i class="fa-solid fa-shield-halved"></i>
+                    </div>
+                    <h5 class="card-title">Secure Identity</h5>
+                    <p class="text-muted mb-0">
+                        Registration, login and account management out of the box.
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4" data-aos="fade-up" data-aos-delay="100">
+            <div class="card border-0 shadow-sm h-100 hover-lift">
+                <div class="card-body text-center p-4">
+                    <div class="auth-icon mb-3">
+                        <i class="fa-solid fa-user-shield"></i>
+                    </div>
+                    <h5 class="card-title">Role-based Admin</h5>
+                    <p class="text-muted mb-0">
+                        A seeded Admin account and a protected dashboard.
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4" data-aos="fade-up" data-aos-delay="200">
+            <div class="card border-0 shadow-sm h-100 hover-lift">
+                <div class="card-body text-center p-4">
+                    <div class="auth-icon mb-3">
+                        <i class="fa-solid fa-wand-magic-sparkles"></i>
+                    </div>
+                    <h5 class="card-title">Modern UI</h5>
+                    <p class="text-muted mb-0">
+                        Font Awesome, SweetAlert2, Notyf, DataTables and more, preconfigured.
+                    </p>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+</div>
+'@
+
+    Set-Content `
+        -Path "$homeViewsPath\Index.cshtml" `
+        -Value $homeIndex `
+        -Encoding UTF8
+
+    $homePrivacy = @'
+@{
+    ViewData["Title"] = "Privacy Policy";
+}
+
+<div class="container py-4" data-aos="fade-up">
+
+    <h1 class="h2 fw-bold">
+        <i class="fa-solid fa-user-shield me-2 text-primary"></i>
+        @ViewData["Title"]
+    </h1>
+
+    <p class="text-muted">
+        Use this page to detail your site's privacy policy.
+    </p>
+
+</div>
+'@
+
+    Set-Content `
+        -Path "$homeViewsPath\Privacy.cshtml" `
+        -Value $homePrivacy `
+        -Encoding UTF8
+}
+
+# ------------------------------------------------------------
+# 16.8 Post-process scaffolded Identity pages
+#      - _StatusMessage partial -> Notyf toast
+#      - Login / Logout        -> Notyf toast through TempData
+# ------------------------------------------------------------
+
+Write-Host ""
+Write-Host "Wiring Notyf into scaffolded Identity pages..." -ForegroundColor Cyan
+
+$statusMessagePartial = @'
+@model string
+
+@if (!string.IsNullOrEmpty(Model))
+{
+    var statusType =
+        Model.StartsWith("Error", StringComparison.OrdinalIgnoreCase)
+            ? "error"
+            : "success";
+
+    <div class="d-none"
+         data-notyf-type="@statusType"
+         data-notyf-message="@Model"></div>
+}
+'@
+
+if (Test-Path "Areas\Identity") {
+
+    Get-ChildItem `
+        -Path "Areas\Identity" `
+        -Recurse `
+        -Filter "_StatusMessage.cshtml" |
+    ForEach-Object {
+
+        Set-Content `
+            -Path $_.FullName `
+            -Value $statusMessagePartial `
+            -Encoding UTF8
+    }
+}
+
+# Login: success toast
+$loginCsPath = "$identityAccountPath\Login.cshtml.cs"
+
+if (Test-Path $loginCsPath) {
+
+    $loginCs = Get-Content $loginCsPath -Raw
+
+    if ($loginCs -notmatch 'TempData\["Success"\]') {
+
+        $loginCs = $loginCs.Replace(
+            '_logger.LogInformation("User logged in.");',
+            '_logger.LogInformation("User logged in.");' +
+            "`r`n                " +
+            'TempData["Success"] = "Welcome back! You are now signed in.";')
+
+        Set-Content `
+            -Path $loginCsPath `
+            -Value $loginCs `
+            -Encoding UTF8
+    }
+}
+
+# Logout: info toast
+$logoutCsPath = "$identityAccountPath\Logout.cshtml.cs"
+
+if (Test-Path $logoutCsPath) {
+
+    $logoutCs = Get-Content $logoutCsPath -Raw
+
+    if ($logoutCs -notmatch 'TempData\["Info"\]') {
+
+        $logoutCs = $logoutCs.Replace(
+            '_logger.LogInformation("User logged out.");',
+            '_logger.LogInformation("User logged out.");' +
+            "`r`n        " +
+            'TempData["Info"] = "You have been signed out.";')
+
+        Set-Content `
+            -Path $logoutCsPath `
+            -Value $logoutCs `
+            -Encoding UTF8
+    }
+}
+
+
+# ============================================================
+# 17. CREATE ADMIN CONTROLLER
+# ============================================================
+
+Write-Host ""
+Write-Host "Creating Admin controller..." -ForegroundColor Cyan
+
+$controllersPath = "Controllers"
+
+$adminController = @"
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+
+namespace $rootNamespace.Controllers;
+
+[Authorize(Roles = "Admin")]
+public class AdminController : Controller
+{
+    public IActionResult Index()
+    {
+        return View();
+    }
+}
+"@
+
+Set-Content `
+    -Path "$controllersPath\AdminController.cs" `
+    -Value $adminController `
+    -Encoding UTF8
+
+# ============================================================
+# 18. CREATE ADMIN DASHBOARD VIEW
+# ============================================================
+
+Write-Host ""
+Write-Host "Creating Admin Dashboard..." -ForegroundColor Cyan
+
+$adminViewsPath = "Views\Admin"
+
+New-Item `
+    -ItemType Directory `
+    -Path $adminViewsPath `
+    -Force | Out-Null
+
+$adminView = @'
+@{
+    ViewData["Title"] = "Admin Dashboard";
+}
+
+<div class="container py-4">
+
+    <div class="d-flex justify-content-between align-items-center mb-4"
+         data-aos="fade-down">
+
+        <div>
+            <h1 class="display-6 fw-bold">
+                <i class="fa-solid fa-gauge-high me-2 text-primary"></i>
+                Admin Dashboard
+            </h1>
+
+            <p class="text-muted mb-0">
+                Manage your application.
+            </p>
+        </div>
+
+    </div>
+
+    <div class="row g-4">
+
+        <div class="col-md-4" data-aos="fade-up" data-aos-delay="0">
+
+            <div class="card border-0 shadow-sm h-100 hover-lift">
+
+                <div class="card-body">
+
+                    <h5 class="card-title">
+                        <i class="fa-solid fa-users fa-fw me-2 text-primary"></i>
+                        Users
+                    </h5>
+
+                    <p class="text-muted">
+                        Manage registered users.
+                    </p>
+
+                    <a href="#"
+                       class="btn btn-primary">
+                        <i class="fa-solid fa-arrow-right me-2"></i>
+                        Manage Users
+                    </a>
+
+                </div>
+
+            </div>
+
+        </div>
+
+        <div class="col-md-4" data-aos="fade-up" data-aos-delay="100">
+
+            <div class="card border-0 shadow-sm h-100 hover-lift">
+
+                <div class="card-body">
+
+                    <h5 class="card-title">
+                        <i class="fa-solid fa-shield-halved fa-fw me-2 text-primary"></i>
+                        Roles
+                    </h5>
+
+                    <p class="text-muted">
+                        Manage roles and permissions.
+                    </p>
+
+                    <a href="#"
+                       class="btn btn-primary">
+                        <i class="fa-solid fa-arrow-right me-2"></i>
+                        Manage Roles
+                    </a>
+
+                </div>
+
+            </div>
+
+        </div>
+
+        <div class="col-md-4" data-aos="fade-up" data-aos-delay="200">
+
+            <div class="card border-0 shadow-sm h-100 hover-lift">
+
+                <div class="card-body">
+
+                    <h5 class="card-title">
+                        <i class="fa-solid fa-gear fa-fw me-2 text-primary"></i>
+                        Settings
+                    </h5>
+
+                    <p class="text-muted">
+                        Configure application settings.
+                    </p>
+
+                    <a href="#"
+                       class="btn btn-primary">
+                        <i class="fa-solid fa-arrow-right me-2"></i>
+                        Settings
+                    </a>
+
+                </div>
+
+            </div>
+
+        </div>
+
+    </div>
+
+</div>
+'@
+
+Set-Content `
+    -Path "$adminViewsPath\Index.cshtml" `
+    -Value $adminView `
+    -Encoding UTF8
+
+# ============================================================
+# 19. RESTORE AFTER CUSTOMIZATION
+# ============================================================
+
+Write-Host ""
+Write-Host "Restoring packages after customization..." -ForegroundColor Cyan
+
+dotnet restore
+
+if ($LASTEXITCODE -ne 0) {
+    throw "Post-customization restore failed."
+}
+
+# ============================================================
+# 20. BUILD CUSTOM IDENTITY
+# ============================================================
+
+Write-Host ""
+Write-Host "Building custom Identity..." -ForegroundColor Cyan
+
+dotnet build --no-restore
+
+if ($LASTEXITCODE -ne 0) {
+    throw "Build failed after Identity customization."
+}
+
+# ============================================================
+# 21. CREATE MIGRATION FOR CUSTOM USER FIELDS
+# ============================================================
+
+Write-Host ""
+Write-Host "Creating custom Identity migration..." -ForegroundColor Cyan
+
+dotnet ef migrations add CustomIdentityFields
+
+if ($LASTEXITCODE -ne 0) {
+    throw "Failed to create EF migration."
+}
+
+# ============================================================
+# 22. UPDATE DATABASE
+# ============================================================
+
+Write-Host ""
+Write-Host "Updating database..." -ForegroundColor Cyan
+
+dotnet ef database update
+
+if ($LASTEXITCODE -ne 0) {
+    throw "Database update failed."
+}
+
+# ============================================================
+# 23. FINAL BUILD
+# ============================================================
+
+Write-Host ""
+Write-Host "Performing final build..." -ForegroundColor Cyan
+
+dotnet build
+
+if ($LASTEXITCODE -ne 0) {
+    throw "Final build failed."
+}
+
+# ============================================================
+# 24. SUCCESS
+# ============================================================
+
+Write-Host ""
+Write-Host "==================================================" -ForegroundColor Green
+Write-Host "PROJECT CREATED SUCCESSFULLY" -ForegroundColor Green
+Write-Host "==================================================" -ForegroundColor Green
+Write-Host ""
+
+Write-Host "Project:" -ForegroundColor Cyan
+Write-Host "  $projectName" -ForegroundColor White
+
+Write-Host ""
+Write-Host "Framework:" -ForegroundColor Cyan
+Write-Host "  $framework" -ForegroundColor White
+
+Write-Host ""
+Write-Host "Custom Identity fields:" -ForegroundColor Cyan
+Write-Host "  FirstName" -ForegroundColor White
+Write-Host "  LastName" -ForegroundColor White
+Write-Host "  DisplayName" -ForegroundColor White
+
+Write-Host ""
+Write-Host "Admin account:" -ForegroundColor Cyan
+Write-Host "  Email    : $adminEmail" -ForegroundColor White
+Write-Host "  Password : $adminPassword" -ForegroundColor White
+Write-Host "  Role     : $adminRole" -ForegroundColor White
+
+Write-Host ""
+Write-Host "Features:" -ForegroundColor Cyan
+Write-Host "  [OK] Individual Identity" -ForegroundColor Green
+Write-Host "  [OK] Custom ApplicationUser" -ForegroundColor Green
+Write-Host "  [OK] Custom registration fields" -ForegroundColor Green
+Write-Host "  [OK] Roles" -ForegroundColor Green
+Write-Host "  [OK] Admin user" -ForegroundColor Green
+Write-Host "  [OK] User dropdown" -ForegroundColor Green
+Write-Host "  [OK] Manage Account" -ForegroundColor Green
+Write-Host "  [OK] Admin Dashboard" -ForegroundColor Green
+Write-Host "  [OK] Admin authorization" -ForegroundColor Green
+Write-Host "  [OK] Logout" -ForegroundColor Green
+Write-Host "  [OK] EF migration" -ForegroundColor Green
+Write-Host "  [OK] Database update" -ForegroundColor Green
+Write-Host "  [OK] Font Awesome 7 icons (global)" -ForegroundColor Green
+Write-Host "  [OK] Animate.css + AOS animations" -ForegroundColor Green
+Write-Host "  [OK] DataTables 3, Select2, Flatpickr, intl-tel-input (auto-init)" -ForegroundColor Green
+Write-Host "  [OK] SweetAlert2 confirmations (logout, delete account, 2FA)" -ForegroundColor Green
+Write-Host "  [OK] Notyf notifications (login, register, logout, profile)" -ForegroundColor Green
+
+Write-Host ""
+Write-Host "Starting application..." -ForegroundColor Green
+Write-Host ""
+
+# ============================================================
+# 25. RUN
+#
+# - Reads the URL/profile from Properties\launchSettings.json
+# - Opens the browser once the app is listening
+#   (plain "dotnet run" never opens a browser on its own)
+# - Runs the already-built app with "dotnet run --no-build"
+# ============================================================
+
+$launchProfile = $null
+$appUrl = $null
+
+$launchSettingsPath = "Properties\launchSettings.json"
+
+if (Test-Path $launchSettingsPath) {
+
+    try {
+
+        $launchSettings =
+            Get-Content $launchSettingsPath -Raw | ConvertFrom-Json
+
+        $profiles = $launchSettings.profiles.PSObject.Properties
+
+        # Prefer the https profile, otherwise use the first one
+        # that defines an applicationUrl.
+        $chosen =
+            $profiles |
+            Where-Object {
+                $_.Value.applicationUrl -and $_.Name -eq "https"
+            } |
+            Select-Object -First 1
+
+        if (-not $chosen) {
+            $chosen =
+                $profiles |
+                Where-Object { $_.Value.applicationUrl } |
+                Select-Object -First 1
+        }
+
+        if ($chosen) {
+            $launchProfile = $chosen.Name
+            $appUrl = ($chosen.Value.applicationUrl -split ";")[0]
+        }
+    }
+    catch {
+        Write-Host "Could not read launchSettings.json: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+}
+
+# Open the browser in the background as soon as the port answers.
+if ($appUrl) {
+
+    Write-Host "Application URL: $appUrl" -ForegroundColor Green
+    Write-Host "Press Ctrl+C to stop the application." -ForegroundColor DarkGray
+    Write-Host ""
+
+    $null = Start-Job -ScriptBlock {
+
+        param($url)
+
+        $uri = [System.Uri]$url
+
+        for ($i = 0; $i -lt 90; $i++) {
+
+            try {
+                $client = New-Object System.Net.Sockets.TcpClient
+                $client.Connect($uri.Host, $uri.Port)
+                $client.Close()
+
+                Start-Sleep -Seconds 1
+                Start-Process $url
+                return
+            }
+            catch {
+                Start-Sleep -Seconds 1
+            }
+        }
+
+    } -ArgumentList $appUrl
+}
+
+if ($launchProfile) {
+    dotnet run --no-build --launch-profile $launchProfile
+}
+else {
+    dotnet run --no-build
+}
+
+# If the app stops (or failed to start), say so instead of
+# silently returning to the prompt.
+if ($LASTEXITCODE -ne 0) {
+    Write-Host ""
+    Write-Host "The application exited with code $LASTEXITCODE." -ForegroundColor Red
+    Write-Host "Run 'dotnet run' manually to see the full error." -ForegroundColor Yellow
+}
+
+
+

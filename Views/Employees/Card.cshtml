@@ -1,0 +1,1900 @@
+@model ERP.Identity.Models.Accounts.Employee
+
+@{
+    Layout = null;
+
+    var portrait = string.Equals(
+        (string?)ViewBag.Orientation,
+        "portrait",
+        StringComparison.OrdinalIgnoreCase
+    );
+
+    var department = (string?)ViewBag.DepartmentName
+                     ?? Model.Department
+                     ?? "—";
+
+    var photo = string.IsNullOrWhiteSpace(Model.ProfileImagePath)
+        ? "/images/default-avatar.svg"
+        : Model.ProfileImagePath;
+
+    var orientation = portrait ? "portrait" : "landscape";
+
+    var company = ViewBag.Company as ERP.Identity.Models.CompanySettings
+                  ?? new ERP.Identity.Models.CompanySettings();
+
+    var qrDataUri = (string?)ViewBag.EmployeeQrDataUri;
+
+    var phone = $"{Model.ContactCountryCode} {Model.Phone}".Trim();
+
+    var designation = string.IsNullOrWhiteSpace(Model.Designation)
+        ? "Team Member"
+        : Model.Designation;
+}
+
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+    <meta charset="utf-8" />
+
+    <meta name="viewport"
+          content="width=device-width, initial-scale=1" />
+
+    <title>
+        Employee Card - @Model.EmployeeCode
+    </title>
+
+
+    <!-- =========================================================
+         FONTS
+         ========================================================= -->
+
+    <link rel="preconnect"
+          href="https://fonts.googleapis.com">
+
+    <link rel="preconnect"
+          href="https://fonts.gstatic.com"
+          crossorigin>
+
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Ubuntu:wght@500;700&display=swap"
+          rel="stylesheet">
+
+
+    <!-- =========================================================
+         BOOTSTRAP
+         ========================================================= -->
+
+    <link rel="stylesheet"
+          href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css">
+
+
+    <!-- =========================================================
+         FONT AWESOME
+         ========================================================= -->
+
+    <link rel="stylesheet"
+          href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
+
+
+    <!-- =========================================================
+         APPLICATION CSS
+         ========================================================= -->
+
+    <link rel="stylesheet"
+          href="~/css/styles.css"
+          asp-append-version="true">
+
+
+    <style>
+
+        * {
+            box-sizing: border-box;
+        }
+
+
+        /* =========================================================
+           PAGE
+           ========================================================= */
+
+        body.employee-card-page {
+            min-height: 100vh;
+            margin: 0;
+            padding: 2rem;
+            background: #e9ecee;
+            font-family: 'Poppins', sans-serif;
+        }
+
+
+        /* =========================================================
+           TOOLBAR
+           ========================================================= */
+
+        .employee-card-toolbar {
+            width: min(820px, 100%);
+            margin: 0 auto 1.2rem;
+
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+
+            gap: 1rem;
+        }
+
+
+        /* =========================================================
+           CARD PAIR
+           ========================================================= */
+
+        .employee-card-pair {
+            width: max-content;
+            max-width: 100%;
+
+            margin: 0 auto;
+
+            display: flex;
+            flex-direction: column;
+
+            gap: 9mm;
+        }
+
+
+        /* =========================================================
+           CARD
+           ========================================================= */
+
+        .employee-id-card {
+            width: 85.6mm;
+            height: 54mm;
+
+            background: #ffffff;
+
+            border: 0.2mm solid #dfe7ea;
+            border-radius: 3mm;
+
+            overflow: hidden;
+
+            box-shadow:
+                0 10px 25px rgba(20, 40, 48, 0.08);
+
+            display: flex;
+            flex-direction: column;
+
+            print-color-adjust: exact;
+            -webkit-print-color-adjust: exact;
+        }
+
+
+        /* =========================================================
+           HEADER
+           ========================================================= */
+
+        .employee-card-brand {
+            height: 9mm;
+            min-height: 9mm;
+
+            padding: 1.5mm 3mm;
+
+            background: #163c4b;
+            color: #ffffff;
+
+            display: flex;
+            align-items: center;
+
+            gap: 1.8mm;
+
+            font-family: 'Poppins', sans-serif;
+
+            flex-shrink: 0;
+
+            overflow: hidden;
+        }
+
+
+        .employee-card-brand i {
+            color: #f4c66a;
+            font-size: 3mm;
+            flex-shrink: 0;
+        }
+
+
+        .employee-card-company {
+            flex: 1;
+            min-width: 0;
+
+            color: #ffffff;
+
+            font-size: 2.7mm;
+            font-weight: 700;
+
+            line-height: 1;
+
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+
+        .employee-card-kind {
+            flex-shrink: 0;
+
+            color: #dfece8;
+
+            font-size: 1.8mm;
+            font-weight: 700;
+
+            letter-spacing: 0.18mm;
+
+            text-transform: uppercase;
+
+            white-space: nowrap;
+        }
+
+
+        /* =========================================================
+           FRONT BODY
+           ========================================================= */
+
+        .employee-card-front-body {
+            flex: 1;
+
+            display: flex;
+            align-items: center;
+
+            padding: 2.5mm 3.2mm 1.5mm;
+
+            background: #ffffff;
+
+            min-width: 0;
+            min-height: 0;
+
+            overflow: hidden;
+        }
+
+
+        /* =========================================================
+           FRONT PHOTO
+           ========================================================= */
+
+        .employee-card-photo-wrap {
+            width: 29mm;
+            height: 29mm;
+
+            flex: 0 0 29mm;
+
+            display: flex;
+            align-items: center;
+            justify-content: center;
+
+            margin-right: 4mm;
+        }
+
+
+        .employee-card-photo {
+            width: 28mm;
+            height: 28mm;
+
+            border-radius: 50%;
+
+            object-fit: cover;
+
+            display: block;
+
+            background: #f1f5f5;
+
+            border: 0.7mm solid #e4eeee;
+
+            box-shadow:
+                0 0 0 0.4mm #ffffff;
+        }
+
+
+        /* =========================================================
+           FRONT INFORMATION
+           ========================================================= */
+
+        .employee-card-front-info {
+            flex: 1;
+
+            min-width: 0;
+
+            max-width: 100%;
+
+            display: flex;
+            flex-direction: column;
+
+            justify-content: center;
+
+            overflow: hidden;
+        }
+
+
+        /* =========================================================
+           EMPLOYEE NAME
+           ========================================================= */
+
+        .employee-card-front-name {
+            color: #162f3a;
+
+            font-family: 'Ubuntu', sans-serif;
+
+            font-size: 5.7mm;
+            font-weight: 700;
+
+            line-height: 0.98;
+
+            letter-spacing: -0.05mm;
+
+            max-width: 100%;
+
+            margin: 0 0 1.3mm;
+
+            overflow: hidden;
+
+            display: -webkit-box;
+            -webkit-box-orient: vertical;
+            -webkit-line-clamp: 2;
+
+            overflow-wrap: anywhere;
+            word-break: normal;
+        }
+
+
+        /* =========================================================
+           DESIGNATION
+           ========================================================= */
+
+        .employee-card-front-designation {
+            color: #385864;
+
+            font-size: 2.5mm;
+            font-weight: 500;
+
+            line-height: 1.15;
+
+            margin-bottom: 2mm;
+
+            max-width: 100%;
+
+            white-space: nowrap;
+
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+
+        /* =========================================================
+           EMPLOYEE CODE BADGE
+           ========================================================= */
+
+        .employee-card-code-badge {
+            align-self: flex-start;
+
+            display: inline-flex;
+
+            align-items: center;
+
+            gap: 1.2mm;
+
+            max-width: 100%;
+
+            padding: 1mm 2.2mm;
+
+            background: #e5f3ef;
+
+            color: #11746d;
+
+            border-radius: 5mm;
+
+            font-size: 2.25mm;
+            font-weight: 700;
+
+            line-height: 1;
+
+            white-space: nowrap;
+
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+
+        .employee-card-code-badge i {
+            font-size: 2.3mm;
+            flex-shrink: 0;
+        }
+
+
+        /* =========================================================
+           DEPARTMENT
+           ========================================================= */
+
+        .employee-card-front-department {
+            margin-top: 1.8mm;
+
+            color: #173a47;
+
+            font-size: 2.15mm;
+            font-weight: 700;
+
+            line-height: 1.1;
+
+            max-width: 100%;
+
+            white-space: nowrap;
+
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+
+        /* =========================================================
+           FRONT SUBTITLE
+           ========================================================= */
+
+        .employee-card-front-subtitle {
+            color: #667b81;
+
+            font-size: 1.8mm;
+            font-weight: 400;
+
+            line-height: 1.1;
+
+            margin-top: 0.4mm;
+
+            max-width: 100%;
+
+            white-space: nowrap;
+
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+
+        /* =========================================================
+           FRONT FOOTER
+           ========================================================= */
+
+        .employee-card-front-footer {
+            min-height: 7.5mm;
+
+            background: #14807a;
+
+            color: #ffffff;
+
+            padding: 1.5mm 2.5mm;
+
+            display: flex;
+            align-items: center;
+
+            gap: 1.5mm;
+
+            flex-shrink: 0;
+
+            overflow: hidden;
+        }
+
+
+        .employee-card-front-footer-company {
+            font-size: 2mm;
+            font-weight: 700;
+
+            line-height: 1;
+
+            white-space: nowrap;
+
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+
+        .employee-card-front-footer-separator {
+            font-size: 1.8mm;
+            opacity: 0.75;
+
+            flex-shrink: 0;
+        }
+
+
+        .employee-card-front-footer-text {
+            font-size: 1.75mm;
+            font-weight: 400;
+
+            line-height: 1;
+
+            white-space: nowrap;
+
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+
+        /* =========================================================
+           BACK BODY
+           ========================================================= */
+
+        .employee-card-back-body {
+            flex: 1;
+
+            display: flex;
+            align-items: center;
+
+            gap: 4mm;
+
+            padding: 2.8mm 3.5mm 2mm;
+
+            min-width: 0;
+            min-height: 0;
+
+            overflow: hidden;
+        }
+
+
+        /* =========================================================
+           QR
+           ========================================================= */
+
+        .employee-card-qr-wrap {
+            width: 29mm;
+
+            flex: 0 0 29mm;
+
+            text-align: center;
+
+            min-width: 0;
+        }
+
+
+        .employee-card-qr {
+            width: 25mm;
+            height: 25mm;
+
+            display: block;
+
+            margin: 0 auto 1mm;
+
+            image-rendering: pixelated;
+        }
+
+
+        .employee-card-qr-caption {
+            color: #6d7d80;
+
+            font-size: 1.65mm;
+
+            line-height: 1.15;
+
+            display: block;
+
+            max-width: 100%;
+
+            overflow-wrap: break-word;
+        }
+
+
+        /* =========================================================
+           BACK DETAILS
+           ========================================================= */
+
+        .employee-card-info-grid {
+            flex: 1;
+
+            min-width: 0;
+            max-width: 100%;
+
+            display: grid;
+
+            grid-template-columns:
+                minmax(0, 1fr)
+                minmax(0, 1fr);
+
+            gap: 1.9mm 3.5mm;
+
+            overflow: hidden;
+        }
+
+
+        .employee-card-field {
+            min-width: 0;
+            max-width: 100%;
+
+            overflow: hidden;
+        }
+
+
+        .employee-card-field span {
+            display: block;
+
+            color: #768a90;
+
+            font-size: 1.55mm;
+            font-weight: 700;
+
+            line-height: 1.1;
+
+            letter-spacing: 0.08mm;
+
+            text-transform: uppercase;
+
+            white-space: nowrap;
+
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+
+        .employee-card-field strong {
+            display: -webkit-box;
+
+            margin-top: 0.3mm;
+
+            color: #1d3944;
+
+            font-size: 2.45mm;
+            font-weight: 700;
+
+            line-height: 1.1;
+
+            min-width: 0;
+            max-width: 100%;
+
+            overflow: hidden;
+
+            overflow-wrap: anywhere;
+            word-break: break-word;
+
+            -webkit-box-orient: vertical;
+            -webkit-line-clamp: 2;
+
+            text-overflow: ellipsis;
+        }
+
+
+        /* =========================================================
+           BACK FOOTER
+           ========================================================= */
+
+        .employee-card-return {
+            min-height: 7.5mm;
+
+            background: #14807a;
+
+            color: #ffffff;
+
+            padding: 1.2mm 3mm;
+
+            font-size: 1.75mm;
+
+            line-height: 1.15;
+
+            flex-shrink: 0;
+
+            min-width: 0;
+
+            overflow: hidden;
+        }
+
+
+        .employee-card-return strong {
+            display: block;
+
+            font-size: 2mm;
+            font-weight: 700;
+
+            max-width: 100%;
+
+            white-space: nowrap;
+
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+
+        .employee-card-return-address {
+            display: block;
+
+            margin-top: 0.3mm;
+
+            color: #dbeee9;
+
+            max-width: 100%;
+
+            white-space: nowrap;
+
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+
+        /* =========================================================
+           PORTRAIT
+           ========================================================= */
+
+        .employee-id-card.portrait {
+            width: 54mm;
+            height: 85.6mm;
+        }
+
+
+        .employee-id-card.portrait
+        .employee-card-front-body {
+            flex-direction: column;
+
+            justify-content: center;
+
+            padding: 4mm 3mm;
+        }
+
+
+        .employee-id-card.portrait
+        .employee-card-photo-wrap {
+            margin-right: 0;
+            margin-bottom: 3mm;
+        }
+
+
+        .employee-id-card.portrait
+        .employee-card-front-info {
+            width: 100%;
+            text-align: center;
+            align-items: center;
+        }
+
+
+        .employee-id-card.portrait
+        .employee-card-code-badge {
+            align-self: center;
+        }
+
+
+        .employee-id-card.portrait
+        .employee-card-back-body {
+            flex-direction: column;
+            justify-content: center;
+            gap: 3mm;
+        }
+
+
+        .employee-id-card.portrait
+        .employee-card-qr-wrap {
+            width: 100%;
+        }
+
+
+        .employee-id-card.portrait
+        .employee-card-info-grid {
+            width: 100%;
+        }
+
+
+        /* =========================================================
+           PRINT
+           ========================================================= */
+
+        @@page employeeCardLandscape {
+            size: 85.6mm 54mm;
+            margin: 0;
+        }
+
+
+        @@page employeeCardPortrait {
+            size: 54mm 85.6mm;
+            margin: 0;
+        }
+
+
+        @@media print {
+
+            html,
+            body.employee-card-page {
+                width: auto;
+
+                min-height: 0;
+
+                margin: 0;
+                padding: 0;
+
+                background: #ffffff !important;
+
+                overflow: visible;
+            }
+
+
+            body.employee-card-page * {
+                visibility: hidden !important;
+            }
+
+
+            #printCards,
+            #printCards * {
+                visibility: visible !important;
+            }
+
+
+            #printCards {
+                display: block;
+
+                width: auto;
+
+                margin: 0;
+            }
+
+
+            .employee-id-card {
+                margin: 0;
+
+                border: 0;
+
+                border-radius: 0;
+
+                box-shadow: none;
+
+                page: employeeCardLandscape;
+
+                break-after: page;
+
+                page-break-after: always;
+            }
+
+
+            .employee-id-card.portrait {
+                page: employeeCardPortrait;
+            }
+
+
+            .employee-id-card:last-child {
+                break-after: auto;
+
+                page-break-after: auto;
+            }
+
+
+            .employee-card-toolbar {
+                display: none !important;
+            }
+        }
+
+
+        /* =========================================================
+           MOBILE
+           ========================================================= */
+
+        @@media screen and (max-width: 575px) {
+
+            body.employee-card-page {
+                padding: 1rem 0.5rem;
+            }
+
+
+            .employee-card-toolbar {
+                flex-wrap: wrap;
+            }
+        }
+
+    </style>
+
+</head>
+
+
+<body class="employee-card-page">
+
+
+    <!-- =========================================================
+         TOOLBAR
+         ========================================================= -->
+
+    <div class="employee-card-toolbar">
+
+        <div>
+
+            <a asp-controller="Employees"
+               asp-action="Details"
+               asp-route-id="@Model.Id"
+               class="btn btn-light btn-sm">
+
+                <i class="fa-solid fa-arrow-left me-1"></i>
+
+                Employee
+
+            </a>
+
+
+            <a asp-controller="Employees"
+               asp-action="Card"
+               asp-route-id="@Model.Id"
+               asp-route-orientation="@(portrait ? "landscape" : "portrait")"
+               class="btn btn-light btn-sm">
+
+                <i class="fa-solid fa-rotate me-1"></i>
+
+                @(portrait ? "Landscape" : "Portrait")
+
+            </a>
+
+        </div>
+
+
+        <div class="d-flex gap-2">
+
+            <a asp-controller="Employees"
+               asp-action="ExportCardExcel"
+               asp-route-id="@Model.Id"
+               class="btn btn-outline-success btn-sm">
+
+                <i class="fa-solid fa-file-excel me-1"></i>
+
+                Excel
+
+            </a>
+
+
+            <button type="button"
+                    class="btn btn-outline-secondary btn-sm"
+                    onclick="downloadCardSvg()">
+
+                <i class="fa-solid fa-file-code me-1"></i>
+
+                SVG
+
+            </button>
+
+
+            <button type="button"
+                    class="btn btn-primary btn-sm"
+                    onclick="downloadCardPng()">
+
+                <i class="fa-solid fa-image me-1"></i>
+
+                Image
+
+            </button>
+
+
+            <button type="button"
+                    class="btn btn-primary btn-sm"
+                    onclick="window.print()">
+
+                <i class="fa-solid fa-print me-1"></i>
+
+                Print
+
+            </button>
+
+        </div>
+
+    </div>
+
+
+    <!-- =========================================================
+         CARDS
+         ========================================================= -->
+
+    <div id="printCards"
+         class="employee-card-pair">
+
+
+        <!-- =====================================================
+             FRONT CARD
+             ===================================================== -->
+
+        <main id="employeeCardFront"
+              class="employee-id-card @orientation @(portrait ? "portrait" : "landscape")">
+
+
+            <!-- HEADER -->
+
+            <header class="employee-card-brand">
+
+                <i class="fa-solid fa-cubes-stacked"></i>
+
+                <span class="employee-card-company">
+                    @company.CompanyName
+                </span>
+
+                <span class="employee-card-kind">
+                    Employee ID
+                </span>
+
+            </header>
+
+
+            <!-- FRONT CONTENT -->
+
+            <div class="employee-card-front-body">
+
+
+                <!-- PHOTO -->
+
+                <div class="employee-card-photo-wrap">
+
+                    <img src="@photo"
+                         class="employee-card-photo"
+                         alt="Employee photo" />
+
+                </div>
+
+
+                <!-- EMPLOYEE INFORMATION -->
+
+                <div class="employee-card-front-info">
+
+
+                    <!-- NAME -->
+
+                    <div class="employee-card-front-name">
+                        @Model.Name
+                    </div>
+
+
+                    <!-- DESIGNATION -->
+
+                    <div class="employee-card-front-designation">
+                        @designation
+                    </div>
+
+
+                    <!-- EMPLOYEE CODE -->
+
+                    <div class="employee-card-code-badge">
+
+                        <i class="fa-solid fa-id-badge"></i>
+
+                        <span>
+                            @Model.EmployeeCode
+                        </span>
+
+                    </div>
+
+
+                    <!-- DEPARTMENT -->
+
+                    <div class="employee-card-front-department">
+                        @department
+                    </div>
+
+
+                    <!-- SUBTITLE -->
+
+                    <div class="employee-card-front-subtitle">
+                        Employee identification card
+                    </div>
+
+                </div>
+
+            </div>
+
+
+            <!-- FRONT FOOTER -->
+
+            <div class="employee-card-front-footer">
+
+                <span class="employee-card-front-footer-company">
+                    @company.CompanyName
+                </span>
+
+                <span class="employee-card-front-footer-separator">
+                    ·
+                </span>
+
+                <span class="employee-card-front-footer-text">
+                    Official employee identification
+                </span>
+
+            </div>
+
+        </main>
+
+
+        <!-- =====================================================
+             BACK CARD
+             ===================================================== -->
+
+        <main id="employeeCardBack"
+              class="employee-id-card back @orientation @(portrait ? "portrait" : "landscape")">
+
+
+            <!-- HEADER -->
+
+            <header class="employee-card-brand">
+
+                <i class="fa-solid fa-cubes-stacked"></i>
+
+                <span class="employee-card-company">
+                    @company.CompanyName
+                </span>
+
+                <span class="employee-card-kind">
+                    Employee Details
+                </span>
+
+            </header>
+
+
+            <!-- BACK BODY -->
+
+            <div class="employee-card-back-body">
+
+
+                <!-- QR -->
+
+                <div class="employee-card-qr-wrap">
+
+                    @if (!string.IsNullOrWhiteSpace(qrDataUri))
+                    {
+                        <img src="@qrDataUri"
+                             class="employee-card-qr"
+                             alt="Employee QR code" />
+                    }
+
+                    <span class="employee-card-qr-caption">
+                        Scan to verify employee record
+                    </span>
+
+                </div>
+
+
+                <!-- DETAILS -->
+
+                <div class="employee-card-info-grid">
+
+
+                    <!-- CNIC -->
+
+                    <div class="employee-card-field">
+
+                        <span>
+                            CNIC
+                        </span>
+
+                        <strong>
+                            @(Model.CNICNumber ?? "—")
+                        </strong>
+
+                    </div>
+
+
+                    <!-- DEPARTMENT -->
+
+                    <div class="employee-card-field">
+
+                        <span>
+                            Department
+                        </span>
+
+                        <strong>
+                            @department
+                        </strong>
+
+                    </div>
+
+
+                    <!-- BLOOD GROUP -->
+
+                    <div class="employee-card-field">
+
+                        <span>
+                            Blood Group
+                        </span>
+
+                        <strong>
+                            @(Model.BloodGroup ?? "—")
+                        </strong>
+
+                    </div>
+
+
+                    <!-- PHONE -->
+
+                    <div class="employee-card-field">
+
+                        <span>
+                            Phone
+                        </span>
+
+                        <strong>
+                            @phone
+                        </strong>
+
+                    </div>
+
+
+                    <!-- JOINED -->
+
+                    <div class="employee-card-field">
+
+                        <span>
+                            Joined
+                        </span>
+
+                        <strong>
+                            @(Model.JoiningDate?.ToString("dd MMM yyyy") ?? "—")
+                        </strong>
+
+                    </div>
+
+
+                    <!-- DESIGNATION -->
+
+                    <div class="employee-card-field">
+
+                        <span>
+                            Designation
+                        </span>
+
+                        <strong>
+                            @designation
+                        </strong>
+
+                    </div>
+
+                </div>
+
+            </div>
+
+
+            <!-- RETURN FOOTER -->
+
+            <div class="employee-card-return">
+
+                <strong>
+                    IF FOUND, PLEASE RETURN TO @company.CompanyName
+                </strong>
+
+                <span class="employee-card-return-address">
+                    @(string.IsNullOrWhiteSpace(company.Address)
+                        ? "Company address not set"
+                        : company.Address)
+                </span>
+
+            </div>
+
+        </main>
+
+    </div>
+
+
+    <!-- =========================================================
+         HTML2CANVAS
+         ========================================================= -->
+
+    <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+
+
+    <script>
+
+        /* =========================================================
+           SVG
+           ========================================================= */
+
+        function downloadCardSvg() {
+
+            const companyName =
+                @Html.Raw(
+                    System.Text.Json.JsonSerializer.Serialize(
+                        company.CompanyName ?? ""
+                    )
+                );
+
+
+            const employeeName =
+                @Html.Raw(
+                    System.Text.Json.JsonSerializer.Serialize(
+                        Model.Name ?? "Employee"
+                    )
+                );
+
+
+            const employeeCode =
+                @Html.Raw(
+                    System.Text.Json.JsonSerializer.Serialize(
+                        Model.EmployeeCode ?? ""
+                    )
+                );
+
+
+            const departmentName =
+                @Html.Raw(
+                    System.Text.Json.JsonSerializer.Serialize(
+                        department
+                    )
+                );
+
+
+            const cnic =
+                @Html.Raw(
+                    System.Text.Json.JsonSerializer.Serialize(
+                        Model.CNICNumber ?? "—"
+                    )
+                );
+
+
+            const bloodGroup =
+                @Html.Raw(
+                    System.Text.Json.JsonSerializer.Serialize(
+                        Model.BloodGroup ?? "—"
+                    )
+                );
+
+
+            const phoneValue =
+                @Html.Raw(
+                    System.Text.Json.JsonSerializer.Serialize(
+                        phone
+                    )
+                );
+
+
+            const joined =
+                @Html.Raw(
+                    System.Text.Json.JsonSerializer.Serialize(
+                        Model.JoiningDate?.ToString("dd MMM yyyy") ?? "—"
+                    )
+                );
+
+
+            const designationValue =
+                @Html.Raw(
+                    System.Text.Json.JsonSerializer.Serialize(
+                        designation
+                    )
+                );
+
+
+            const address =
+                @Html.Raw(
+                    System.Text.Json.JsonSerializer.Serialize(
+                        string.IsNullOrWhiteSpace(company.Address)
+                            ? "Company address not set"
+                            : company.Address
+                    )
+                );
+
+
+            function escapeXml(value) {
+
+                return String(value)
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/'/g, '&apos;');
+
+            }
+
+
+            const safeCompany =
+                escapeXml(companyName);
+
+            const safeName =
+                escapeXml(employeeName);
+
+            const safeCode =
+                escapeXml(employeeCode);
+
+            const safeDepartment =
+                escapeXml(departmentName);
+
+            const safeCnic =
+                escapeXml(cnic);
+
+            const safeBlood =
+                escapeXml(bloodGroup);
+
+            const safePhone =
+                escapeXml(phoneValue);
+
+            const safeJoined =
+                escapeXml(joined);
+
+            const safeDesignation =
+                escapeXml(designationValue);
+
+            const safeAddress =
+                escapeXml(address);
+
+
+            const svg = `
+
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="175mm"
+     height="115mm"
+     viewBox="0 0 1750 1150">
+
+    <style>
+
+        text {
+            font-family: Arial, sans-serif;
+        }
+
+        .header {
+            font-size: 27px;
+            font-weight: 700;
+            fill: #ffffff;
+        }
+
+        .kind {
+            font-size: 17px;
+            font-weight: 700;
+            fill: #dcece9;
+        }
+
+        .name {
+            font-size: 56px;
+            font-weight: 700;
+            fill: #162f3a;
+        }
+
+        .designation {
+            font-size: 24px;
+            fill: #385864;
+        }
+
+        .code {
+            font-size: 20px;
+            font-weight: 700;
+            fill: #11746d;
+        }
+
+        .label {
+            font-size: 15px;
+            font-weight: 700;
+            fill: #708a90;
+        }
+
+        .value {
+            font-size: 21px;
+            font-weight: 700;
+            fill: #173441;
+        }
+
+        .footer {
+            font-size: 17px;
+            fill: #ffffff;
+        }
+
+    </style>
+
+
+    <!-- =====================================================
+         FRONT
+         ===================================================== -->
+
+    <rect x="0"
+          y="0"
+          width="850"
+          height="530"
+          rx="18"
+          fill="#ffffff"
+          stroke="#d8e4e7"/>
+
+
+    <rect x="0"
+          y="0"
+          width="850"
+          height="70"
+          fill="#163c4b"/>
+
+
+    <text x="32"
+          y="45"
+          class="header">
+        ${safeCompany}
+    </text>
+
+
+    <text x="735"
+          y="45"
+          class="kind"
+          text-anchor="middle">
+        EMPLOYEE ID
+    </text>
+
+
+    <!-- PHOTO -->
+
+    <circle cx="145"
+            cy="275"
+            r="105"
+            fill="#f1f5f5"
+            stroke="#e4eeee"
+            stroke-width="6"/>
+
+
+    <!-- FRONT TEXT -->
+
+    <text x="285"
+          y="180"
+          class="name">
+        ${safeName}
+    </text>
+
+
+    <text x="285"
+          y="220"
+          class="designation">
+        ${escapeXml(designation)}
+    </text>
+
+
+    <rect x="285"
+          y="242"
+          width="180"
+          height="40"
+          rx="20"
+          fill="#e5f3ef"/>
+
+
+    <text x="300"
+          y="268"
+          class="code">
+        ${safeCode}
+    </text>
+
+
+    <text x="285"
+          y="315"
+          class="value">
+        ${safeDepartment}
+    </text>
+
+
+    <text x="285"
+          y="338"
+          font-size="16"
+          fill="#667b81">
+        Employee identification card
+    </text>
+
+
+    <!-- FRONT FOOTER -->
+
+    <rect x="0"
+          y="455"
+          width="850"
+          height="75"
+          fill="#14807a"/>
+
+
+    <text x="28"
+          y="493"
+          class="footer"
+          font-weight="700">
+        ${safeCompany}
+    </text>
+
+
+    <text x="285"
+          y="493"
+          class="footer">
+        · Official employee identification
+    </text>
+
+
+    <!-- =====================================================
+         BACK
+         ===================================================== -->
+
+    <rect x="0"
+          y="550"
+          width="850"
+          height="530"
+          rx="18"
+          fill="#ffffff"
+          stroke="#d8e4e7"/>
+
+
+    <rect x="0"
+          y="550"
+          width="850"
+          height="70"
+          fill="#163c4b"/>
+
+
+    <text x="32"
+          y="595"
+          class="header">
+        ${safeCompany}
+    </text>
+
+
+    <text x="735"
+          y="595"
+          class="kind"
+          text-anchor="middle">
+        EMPLOYEE DETAILS
+    </text>
+
+
+    <!-- QR PLACEHOLDER -->
+
+    <rect x="55"
+          y="655"
+          width="190"
+          height="190"
+          fill="#ffffff"
+          stroke="#b6c5c8"/>
+
+
+    <text x="150"
+          y="760"
+          text-anchor="middle"
+          font-size="17"
+          fill="#60787d">
+        QR
+    </text>
+
+
+    <!-- LEFT COLUMN -->
+
+    <text x="285"
+          y="680"
+          class="label">
+        CNIC
+    </text>
+
+    <text x="285"
+          y="708"
+          class="value">
+        ${safeCnic}
+    </text>
+
+
+    <text x="285"
+          y="755"
+          class="label">
+        BLOOD GROUP
+    </text>
+
+    <text x="285"
+          y="783"
+          class="value">
+        ${safeBlood}
+    </text>
+
+
+    <text x="285"
+          y="830"
+          class="label">
+        JOINED
+    </text>
+
+    <text x="285"
+          y="858"
+          class="value">
+        ${safeJoined}
+    </text>
+
+
+    <!-- RIGHT COLUMN -->
+
+    <text x="520"
+          y="680"
+          class="label">
+        DEPARTMENT
+    </text>
+
+    <text x="520"
+          y="708"
+          class="value">
+        ${safeDepartment}
+    </text>
+
+
+    <text x="520"
+          y="755"
+          class="label">
+        PHONE
+    </text>
+
+    <text x="520"
+          y="783"
+          class="value">
+        ${safePhone}
+    </text>
+
+
+    <text x="520"
+          y="830"
+          class="label">
+        DESIGNATION
+    </text>
+
+    <text x="520"
+          y="858"
+          class="value">
+        ${safeDesignation}
+    </text>
+
+
+    <!-- BACK FOOTER -->
+
+    <rect x="0"
+          y="970"
+          width="850"
+          height="110"
+          fill="#14807a"/>
+
+
+    <text x="28"
+          y="1008"
+          font-size="18"
+          font-weight="700"
+          fill="#ffffff">
+        IF FOUND, PLEASE RETURN TO ${safeCompany}
+    </text>
+
+
+    <text x="28"
+          y="1040"
+          font-size="14"
+          fill="#dbeee9">
+        ${safeAddress}
+    </text>
+
+</svg>`;
+
+
+            const blob = new Blob(
+                [svg],
+                {
+                    type: 'image/svg+xml;charset=utf-8'
+                }
+            );
+
+
+            const url =
+                URL.createObjectURL(blob);
+
+
+            const link =
+                document.createElement('a');
+
+
+            link.href = url;
+
+            link.download =
+                '@(Model.EmployeeCode)-employee-card.svg';
+
+
+            document.body.appendChild(link);
+
+            link.click();
+
+            document.body.removeChild(link);
+
+
+            setTimeout(() => {
+
+                URL.revokeObjectURL(url);
+
+            }, 100);
+
+        }
+
+
+        /* =========================================================
+           PNG
+           ========================================================= */
+
+        function downloadCardPng() {
+
+            const cards = [
+
+                document.getElementById(
+                    'employeeCardFront'
+                ),
+
+                document.getElementById(
+                    'employeeCardBack'
+                )
+
+            ];
+
+
+            const canvas =
+                document.createElement('canvas');
+
+
+            const ctx =
+                canvas.getContext('2d');
+
+
+            const pageWidth = 850;
+            const pageHeight = 1080;
+
+
+            canvas.width =
+                pageWidth * 2;
+
+
+            canvas.height =
+                pageHeight * 2;
+
+
+            ctx.scale(2, 2);
+
+
+            ctx.fillStyle =
+                '#f7f9fa';
+
+
+            ctx.fillRect(
+                0,
+                0,
+                pageWidth,
+                pageHeight
+            );
+
+
+            const loadCard =
+                (card, yPos) => {
+
+                    return html2canvas(
+                        card,
+                        {
+                            scale: 2,
+
+                            backgroundColor:
+                                '#ffffff',
+
+                            useCORS:
+                                true
+                        }
+                    )
+                    .then(rendered => {
+
+                        ctx.drawImage(
+                            rendered,
+
+                            0,
+                            yPos,
+
+                            rendered.width / 2,
+                            rendered.height / 2
+                        );
+
+                    });
+
+                };
+
+
+            Promise.all([
+
+                loadCard(
+                    cards[0],
+                    0
+                ),
+
+                loadCard(
+                    cards[1],
+                    550
+                )
+
+            ])
+            .then(() => {
+
+                const link =
+                    document.createElement('a');
+
+
+                link.download =
+                    '@(Model.EmployeeCode)-employee-card.png';
+
+
+                link.href =
+                    canvas.toDataURL('image/png');
+
+                document.body.appendChild(link);
+
+                link.click();
+
+                document.body.removeChild(link);
+
+            });
+
+        }
+
+    </script>
+
+</body>
+
+</html>
